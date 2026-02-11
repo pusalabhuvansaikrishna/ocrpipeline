@@ -1,0 +1,47 @@
+Information We Collect
+The application may collect personal and non-personal information, including information provided directly by users and information collected automatically through use of the application.
+
+Information Provided by Users
+This may include details such as name, email address, contact information, account details, or any other information voluntarily submitted by users.
+
+Automatically Collected Information
+The application may collect technical and usage information such as device details, IP address, browser type, operating system, and interaction data.
+
+Use of Information
+Collected information may be used to operate, maintain, improve, and personalize the application, communicate with users, and ensure security and compliance.
+
+Cookies and Tracking Technologies
+The application may use cookies or similar technologies to enhance user experience, analyze usage, and support functionality.
+
+Sharing of Information
+User information may be shared with third-party service providers solely for purposes necessary to operate the application, comply with legal obligations, or protect rights and safety.
+
+Third-Party Services
+The application may include links to or integrate with third-party services that have their own privacy policies, which are not controlled by the application provider.
+
+Data Storage and Retention
+Information is stored only for as long as necessary to fulfill the purposes outlined in this policy or as required by law.
+
+Data Security
+Reasonable technical and organizational measures are implemented to protect user information against unauthorized access, loss, or misuse.
+
+User Rights and Choices
+Users may have rights to access, update, correct, or delete their personal information, subject to applicable laws.
+
+Children’s Privacy
+The application is not intended for use by children below the minimum age required by applicable law, and personal data from such users is not knowingly collected.
+
+International Data Transfers
+User information may be processed or stored in different jurisdictions, subject to applicable data protection laws.
+
+Legal Compliance
+Information may be disclosed if required to comply with legal obligations or lawful requests by authorities.
+
+Changes to This Privacy Policy
+This Privacy Policy may be updated periodically, and continued use of the application indicates acceptance of the updated policy.
+
+Consent
+By using the application, users consent to the collection and use of information as described in this Privacy Policy.
+
+Contact Information
+Users may contact the application provider with questions or concerns regarding this Privacy Policy.
