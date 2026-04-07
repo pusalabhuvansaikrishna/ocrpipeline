@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 
 type PolicyType = "terms" | "privacy" | null;
@@ -22,11 +23,14 @@ export default function SignupPage() {
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Real-time password match check
+  // Google login state
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const router = useRouter();
+
   const passwordsMatch = password === confirmPassword;
   const showMismatchMessage = confirmPassword.length > 0 && !passwordsMatch;
 
-  // Load policy text when modal opens
   useEffect(() => {
     if (!showPolicy) {
       setPolicyContent("");
@@ -58,11 +62,21 @@ export default function SignupPage() {
     fetchPolicy();
   }, [showPolicy]);
 
+  // ✅ Google Login – Direct redirect to backend
+  const handleGoogleLogin = () => {
+    setGoogleLoading(true);
+    setFormError(null);
+
+    const API_BASE =
+      process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+    window.location.href = `${API_BASE}/auth/google/login`;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
-    // Final validation before submit
     if (!passwordsMatch) {
       setFormError("Passwords do not match");
       return;
@@ -82,7 +96,9 @@ export default function SignupPage() {
         receive_updates: receiveUpdates,
       };
 
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const API_BASE =
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
       const response = await fetch(`${API_BASE}/auth/signup`, {
         method: "POST",
         headers: {
@@ -99,14 +115,7 @@ export default function SignupPage() {
         );
       }
 
-      alert("Account created successfully!\nYou can now log in.");
-      // Optional: reset form or redirect
-      setEmail("");
-      setPassword("");
-      setConfirmPassword("");
-      setReceiveUpdates(false);
-      setAgreedToTerms(false);
-
+      router.push("/dashboard");
     } catch (err: any) {
       console.error("Signup error:", err);
       setFormError(err.message || "Something went wrong. Please try again.");
@@ -133,9 +142,19 @@ export default function SignupPage() {
 
           {/* Social login buttons */}
           <div className="space-y-4 mb-8">
-            <button className="w-full flex items-center justify-center gap-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg py-3 px-4 text-gray-200 transition">
-              <img src="https://www.google.com/favicon.ico" alt="Google" className="w-5 h-5" />
-              Continue with Google
+            <button
+              onClick={handleGoogleLogin}
+              disabled={googleLoading}
+              className={`w-full flex items-center justify-center gap-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg py-3 px-4 text-gray-200 transition ${
+                googleLoading ? "opacity-70 cursor-not-allowed" : ""
+              }`}
+            >
+              <img
+                src="https://www.google.com/favicon.ico"
+                alt="Google"
+                className="w-5 h-5"
+              />
+              {googleLoading ? "Redirecting..." : "Continue with Google"}
             </button>
 
             <button className="w-full flex items-center justify-center gap-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg py-3 px-4 text-gray-200 transition">
@@ -196,7 +215,10 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label htmlFor="confirm-password" className="block text-sm text-gray-300 mb-1.5">
+              <label
+                htmlFor="confirm-password"
+                className="block text-sm text-gray-300 mb-1.5"
+              >
                 Confirm Password
               </label>
               <input
@@ -210,21 +232,21 @@ export default function SignupPage() {
                 placeholder="••••••••"
               />
 
-              {/* Real-time password match feedback */}
               {showMismatchMessage && (
                 <p className="mt-1.5 text-sm text-red-400">
                   Passwords do not match
                 </p>
               )}
 
-              {confirmPassword.length > 0 && passwordsMatch && password.length > 0 && (
-                <p className="mt-1.5 text-sm text-green-400">
-                  Passwords match ✓
-                </p>
-              )}
+              {confirmPassword.length > 0 &&
+                passwordsMatch &&
+                password.length > 0 && (
+                  <p className="mt-1.5 text-sm text-green-400">
+                    Passwords match ✓
+                  </p>
+                )}
             </div>
 
-            {/* Submission error (backend or other validation) */}
             {formError && (
               <div className="bg-red-950/60 border border-red-700 text-red-200 px-4 py-3 rounded-lg text-sm">
                 {formError}
@@ -285,14 +307,16 @@ export default function SignupPage() {
 
           <p className="text-center text-gray-400 mt-8 text-sm">
             Already have an account?{" "}
-            <Link href="/login" className="text-orange-500 hover:text-orange-400 font-medium">
+            <Link
+              href="/login"
+              className="text-orange-500 hover:text-orange-400 font-medium"
+            >
               Login
             </Link>
           </p>
         </div>
       </div>
 
-      {/* Policy Modal – unchanged */}
       {showPolicy && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"

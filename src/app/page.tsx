@@ -41,9 +41,9 @@ export default function Home() {
         <div className="space-y-10 md:space-y-16 z-20 mt-[2rem] max-w-5xl w-full">
           <div className="space-y-6 text-center">
             <h1 className="text-6xl sm:text-7xl md:text-8xl lg:text-9xl font-black tracking-tight drop-shadow-2xl">
-              <span className="text-orange-500">FAST</span>
-              <span className="text-orange-600">OC</span>
-              <span className="text-orange-500">R</span>
+              <span className="text-orange-500">Vish</span>
+              <span className="text-orange-600">va</span>
+              <span className="text-orange-500"> Setu</span>
             </h1>
 
             <p className="text-lg md:text-2xl text-gray-200 font-light tracking-wide drop-shadow-lg">

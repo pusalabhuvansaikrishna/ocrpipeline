@@ -1,9 +1,10 @@
+// app/printed/layout.tsx
 import type { Metadata } from "next";
+import PrintedHeader from "./components/Header";
 
 export const metadata: Metadata = {
-  title: "FASTOCR - Handwritten",
-  // description: "Extract printed text from images and PDFs",
-  // You can add icons, open graph, etc. here later if needed
+  title: "FASTOCR - Printed",
+  // description: "...",
 };
 
 export default function PrintedLayout({
@@ -11,5 +12,10 @@ export default function PrintedLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <>{children}</>;
+  return (
+    <>
+      <PrintedHeader />
+      {children}
+    </>
+  );
 }

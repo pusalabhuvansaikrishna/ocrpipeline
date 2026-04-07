@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { League_Spartan } from "next/font/google";
 import "./globals.css";
-import Header from "@/components/Header";
+import HeaderWrapper from "./HeaderWrapper"; // ✅ ONLY this
 
 const leagueSpartan = League_Spartan({
   subsets: ["latin"],
@@ -16,9 +16,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html
       lang="en"
@@ -28,14 +28,13 @@ export default function RootLayout({
       <body
         className={`${leagueSpartan.variable} bg-gray-950 text-gray-100 font-sans antialiased`}
       >
-        {/* Global Header */}
-        <Header />
+        {/* ✅ THIS is the fix */}
+        <HeaderWrapper />
 
-        {/* Page content */}
         <main className="pt-24">
           {children}
         </main>
       </body>
     </html>
   );
-}
+}9
