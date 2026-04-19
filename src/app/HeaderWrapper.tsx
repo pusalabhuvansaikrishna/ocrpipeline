@@ -6,7 +6,7 @@ import Header from "@/components/Header";
 export default function HeaderWrapper() {
   const pathname = usePathname();
 
-  const hideHeader = pathname.includes("/printed");
+  const hideHeader = pathname.includes("/printed") || pathname.includes("/dashboard");
 
   if (hideHeader) return null;
 

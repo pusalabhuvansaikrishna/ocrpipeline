@@ -33,7 +33,6 @@ export default function NewCollectionModal({
   const [btnPopped, setBtnPopped] = useState(false);
   const [errors, setErrors] = useState<{ name?: string; language?: string }>({});
 
-  // Upload state
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [uploadMessage, setUploadMessage] = useState<string>("");
   const [uploadedBlobs, setUploadedBlobs] = useState<string[]>([]);
@@ -45,18 +44,21 @@ export default function NewCollectionModal({
     fetch("/languages.csv")
       .then((res) => res.text())
       .then((text) => {
-        const lines = text
-          .split("\n")
-          .map((line) => line.trim())
-          .filter(Boolean);
+        const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
         setLanguageOptions(lines.map((line) => ({ value: line, label: line })));
       })
       .catch((err) => console.error("Failed to load languages.csv:", err));
   }, []);
 
-  // Reset upload state when modal closes
   useEffect(() => {
     if (!isOpen) {
+      // Reset form fields
+      setName("");
+      setDescription("");
+      setLanguage("");
+      setFiles([]);
+      setErrors({});
+      // Reset upload state
       setUploadStatus("idle");
       setUploadMessage("");
       setUploadedBlobs([]);
@@ -107,7 +109,6 @@ export default function NewCollectionModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validate
     const newErrors: { name?: string; language?: string } = {};
     if (!name.trim()) newErrors.name = "Collection name is required.";
     if (!language) newErrors.language = "Please select a language.";
@@ -117,7 +118,6 @@ export default function NewCollectionModal({
     }
     setErrors({});
 
-    // Build FormData
     const formData = new FormData();
     formData.append("name", name.trim());
     formData.append("description", description.trim());
@@ -125,21 +125,20 @@ export default function NewCollectionModal({
     files.forEach((file) => formData.append("files", file));
 
     setUploadStatus("uploading");
-    setUploadMessage("Uploading files to Azure...");
+    setUploadMessage("Processing Files...");
     setUploadedBlobs([]);
     setFailedFiles([]);
 
     try {
       const response = await fetch(`${API_BASE_URL}/collection/upload`, {
         method: "POST",
-        credentials: "include", // sends the access_token cookie automatically
+        credentials: "include",
         body: formData,
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        // Server returned an error (4xx / 5xx)
         const detail = data?.detail;
         const message =
           typeof detail === "string"
@@ -151,7 +150,6 @@ export default function NewCollectionModal({
         return;
       }
 
-      // Partial or full success
       setUploadedBlobs(data.uploaded ?? []);
       setFailedFiles(data.failed ?? []);
 
@@ -164,8 +162,6 @@ export default function NewCollectionModal({
       } else {
         setUploadStatus("success");
         setUploadMessage(`${data.uploaded.length} file(s) uploaded successfully!`);
-
-        // Notify parent and auto-close after a short delay
         onProcess({ name: name.trim(), description: description.trim(), language, files });
         setTimeout(() => onClose(), 1800);
       }
@@ -181,71 +177,160 @@ export default function NewCollectionModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md"
       onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 100,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "rgba(0,0,0,0.80)",
+        backdropFilter: "blur(6px)",
+      }}
     >
+      {/* Modal shell — fixed height so it never grows beyond viewport */}
       <div
-        className="w-full max-w-2xl bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: "672px",
+          height: "90vh",
+          maxHeight: "90vh",
+          display: "flex",
+          flexDirection: "column",
+          backgroundColor: "#111827",
+          border: "1px solid #374151",
+          borderRadius: "1rem",
+          boxShadow: "0 25px 50px rgba(0,0,0,0.6)",
+          overflow: "hidden",
+        }}
       >
-        {/* Header */}
-        <div className="px-5 py-3 border-b border-gray-700 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-orange-400">
+        {/* Header — pinned, never scrolls */}
+        <div
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "12px 20px",
+            borderBottom: "1px solid #374151",
+          }}
+        >
+          <h2 style={{ margin: 0, fontSize: "1.125rem", fontWeight: 600, color: "#fb923c" }}>
             Create New Collection
           </h2>
           <button
             onClick={onClose}
             disabled={isUploading}
-            className="text-gray-400 hover:text-orange-400 cursor-pointer transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{
+              background: "none",
+              border: "none",
+              cursor: isUploading ? "not-allowed" : "pointer",
+              opacity: isUploading ? 0.4 : 1,
+              color: "#9ca3af",
+              padding: 0,
+              display: "flex",
+            }}
           >
-            <X className="w-5 h-5" />
+            <X size={20} />
           </button>
         </div>
 
-        <div className="flex items-stretch min-h-[420px]">
+        {/* Body — fills remaining height; each column scrolls independently */}
+        <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
 
-          {/* LEFT – Upload zone */}
-          <div className="w-[40%] p-5 border-r border-gray-700 flex">
-            <div className="bg-gray-950 rounded-2xl p-5 border border-gray-700 flex flex-col w-full h-full">
-
-              <div className="text-orange-400 text-lg font-semibold mb-4 text-center">
+          {/* ── LEFT: upload zone + scrollable file list ── */}
+          <div
+            style={{
+              width: "40%",
+              flexShrink: 0,
+              display: "flex",
+              flexDirection: "column",
+              padding: "20px",
+              borderRight: "1px solid #374151",
+              overflow: "hidden",
+            }}
+          >
+            {/* Inner dark card */}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                flex: 1,
+                minHeight: 0,         /* essential — lets child flex scroll */
+                backgroundColor: "#030712",
+                border: "1px solid #374151",
+                borderRadius: "1rem",
+                padding: "20px",
+                overflow: "hidden",
+              }}
+            >
+              <p
+                style={{
+                  flexShrink: 0,
+                  textAlign: "center",
+                  fontWeight: 600,
+                  color: "#fb923c",
+                  margin: "0 0 16px",
+                }}
+              >
                 Upload Here
-              </div>
+              </p>
 
+              {/* Drag-and-drop zone — fixed, never shrinks */}
               <div
                 onDrop={handleDrop}
                 onDragOver={(e) => e.preventDefault()}
-                className="
-                  group flex-1 border-2 border-dashed border-gray-700
-                  rounded-2xl flex flex-col items-center justify-center text-center
-                  transition-colors duration-200 hover:border-orange-500 cursor-default
-                "
+                style={{
+                  flexShrink: 0,
+                  border: "2px dashed #374151",
+                  borderRadius: "1rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "24px 16px",
+                  textAlign: "center",
+                }}
               >
-                <Upload className="w-10 h-10 text-orange-100 mb-4" />
-                <p className="text-sm text-gray-200 mb-4">Drag &amp; drop files here</p>
+                <Upload size={40} style={{ color: "#fef3c7", marginBottom: "16px" }} />
+                <p style={{ margin: "0 0 16px", fontSize: "0.875rem", color: "#e5e7eb" }}>
+                  Drag &amp; drop files here
+                </p>
 
                 <button
                   type="button"
                   onClick={handleSelectClick}
                   disabled={isUploading}
                   style={{
+                    padding: "10px 24px",
+                    backgroundColor: "#ea580c",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "0.5rem",
+                    fontSize: "0.875rem",
+                    cursor: isUploading ? "not-allowed" : "pointer",
+                    opacity: isUploading ? 0.5 : 1,
                     transform: btnPopped ? "scale(0.92)" : "scale(1)",
                     boxShadow: btnPopped
                       ? "0 0 0 4px rgba(234,88,12,0.35)"
                       : "0 2px 8px rgba(0,0,0,0.3)",
-                    transition: "transform 0.15s cubic-bezier(.36,.07,.19,.97), box-shadow 0.15s ease",
+                    transition:
+                      "transform 0.15s cubic-bezier(.36,.07,.19,.97), box-shadow 0.15s ease",
                   }}
-                  className="
-                    px-6 py-2.5
-                    bg-orange-600 hover:bg-orange-500 active:bg-orange-700
-                    text-white text-sm rounded-lg hover:shadow-lg cursor-pointer
-                    disabled:opacity-50 disabled:cursor-not-allowed
-                  "
                 >
                   Select Files / ZIP
                 </button>
 
-                <p className="text-[11px] text-gray-400 mt-4 px-3 text-center leading-relaxed">
+                <p
+                  style={{
+                    margin: "16px 0 0",
+                    fontSize: "11px",
+                    color: "#6b7280",
+                    lineHeight: 1.5,
+                  }}
+                >
                   JPG, PNG, PDF, ZIP • max 10 MB
                 </p>
 
@@ -255,148 +340,325 @@ export default function NewCollectionModal({
                   multiple
                   accept=".png,.jpg,.jpeg,.pdf,.zip"
                   onChange={handleFileSelect}
-                  className="hidden"
+                  style={{ display: "none" }}
                 />
               </div>
 
-              {/* File list */}
+              {/* File list — scrollable, takes all leftover space */}
               {files.length > 0 && (
-                <div className="mt-3 space-y-2 max-h-24 overflow-auto">
-                  {files.map((file, i) => {
-                    const blobPath = `${name.trim()}/${file.name}`;
-                    const wasUploaded = uploadedBlobs.some((b) => b === blobPath);
-                    const hasFailed = failedFiles.some((f) => f.filename === file.name);
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    flex: 1,
+                    minHeight: 0,     /* critical for scroll to work */
+                    marginTop: "12px",
+                    overflow: "hidden",
+                  }}
+                >
+                  <p
+                    style={{
+                      flexShrink: 0,
+                      margin: "0 0 6px",
+                      fontSize: "12px",
+                      color: "#9ca3af",
+                    }}
+                  >
+                    {files.length} file{files.length !== 1 ? "s" : ""} selected
+                  </p>
 
-                    return (
-                      <div
-                        key={i}
-                        className={`flex items-center gap-2 text-xs px-2 py-1 rounded transition-colors ${
-                          wasUploaded
-                            ? "bg-green-900/40 border border-green-700"
-                            : hasFailed
-                            ? "bg-red-900/40 border border-red-700"
-                            : "bg-gray-800"
-                        }`}
-                      >
-                        {file.type.includes("image") ? (
-                          <ImageIcon className="w-4 h-4 text-orange-400 shrink-0" />
-                        ) : (
-                          <FileText className="w-4 h-4 text-orange-400 shrink-0" />
-                        )}
-                        <span className="truncate flex-1">{file.name}</span>
+                  {/* Scrollable list */}
+                  <div
+                    style={{
+                      flex: 1,
+                      minHeight: 0,
+                      overflowY: "auto",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                      paddingRight: "4px",
+                    }}
+                  >
+                    {files.map((file, i) => {
+                      const blobPath = `${name.trim()}/${file.name}`;
+                      const wasUploaded = uploadedBlobs.some((b) => b === blobPath);
+                      const hasFailed = failedFiles.some((f) => f.filename === file.name);
 
-                        {wasUploaded && (
-                          <CheckCircle2 className="w-3 h-3 text-green-400 shrink-0" />
-                        )}
-                        {hasFailed && (
-                          <AlertCircle className="w-3 h-3 text-red-400 shrink-0" />
-                        )}
-                        {!wasUploaded && !hasFailed && (
-                          <button
-                            onClick={() => removeFile(i)}
-                            disabled={isUploading}
-                            className="cursor-pointer disabled:cursor-not-allowed"
+                      return (
+                        <div
+                          key={i}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            fontSize: "12px",
+                            padding: "4px 8px",
+                            borderRadius: "6px",
+                            flexShrink: 0,
+                            backgroundColor: wasUploaded
+                              ? "rgba(20,83,45,0.4)"
+                              : hasFailed
+                              ? "rgba(127,29,29,0.4)"
+                              : "#1f2937",
+                            border: wasUploaded
+                              ? "1px solid #15803d"
+                              : hasFailed
+                              ? "1px solid #b91c1c"
+                              : "1px solid transparent",
+                          }}
+                        >
+                          {file.type.includes("image") ? (
+                            <ImageIcon
+                              size={14}
+                              style={{ color: "#fb923c", flexShrink: 0 }}
+                            />
+                          ) : (
+                            <FileText
+                              size={14}
+                              style={{ color: "#fb923c", flexShrink: 0 }}
+                            />
+                          )}
+                          <span
+                            style={{
+                              flex: 1,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              color: "#f3f4f6",
+                            }}
                           >
-                            <X className="w-3 h-3 text-red-400" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
+                            {file.name}
+                          </span>
+
+                          {wasUploaded && (
+                            <CheckCircle2
+                              size={12}
+                              style={{ color: "#4ade80", flexShrink: 0 }}
+                            />
+                          )}
+                          {hasFailed && (
+                            <AlertCircle
+                              size={12}
+                              style={{ color: "#f87171", flexShrink: 0 }}
+                            />
+                          )}
+                          {!wasUploaded && !hasFailed && (
+                            <button
+                              onClick={() => removeFile(i)}
+                              disabled={isUploading}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                padding: 0,
+                                cursor: isUploading ? "not-allowed" : "pointer",
+                                display: "flex",
+                              }}
+                            >
+                              <X size={12} style={{ color: "#f87171" }} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
           </div>
 
-          {/* RIGHT – Form */}
-          <div className="w-[60%] p-6 flex flex-col">
-            <form onSubmit={handleSubmit} className="flex flex-col h-full">
-
+          {/* ── RIGHT: form, scrolls if viewport is short ── */}
+          <div
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: "24px",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <form
+              onSubmit={handleSubmit}
+              style={{ display: "flex", flexDirection: "column", flex: 1 }}
+            >
               {/* Collection Name */}
-              <div className="mb-5">
-                <label className="block text-sm text-gray-400 mb-1.5">
-                  Collection Name <span className="text-orange-500">*</span>
+              <div style={{ marginBottom: "20px" }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "0.875rem",
+                    color: "#9ca3af",
+                    marginBottom: "6px",
+                  }}
+                >
+                  Collection Name{" "}
+                  <span style={{ color: "#f97316" }}>*</span>
                 </label>
                 <input
                   value={name}
                   disabled={isUploading}
                   onChange={(e) => {
                     setName(e.target.value);
-                    if (e.target.value.trim()) setErrors((prev) => ({ ...prev, name: undefined }));
+                    if (e.target.value.trim())
+                      setErrors((prev) => ({ ...prev, name: undefined }));
                   }}
-                  className={`w-full bg-gray-800 border rounded-xl px-6 py-2 text-gray-100 focus:outline-none transition-colors disabled:opacity-50 ${
-                    errors.name
-                      ? "border-red-500 focus:border-red-400"
-                      : "border-gray-700 focus:border-orange-500"
-                  }`}
+                  style={{
+                    width: "100%",
+                    backgroundColor: "#1f2937",
+                    border: `1px solid ${errors.name ? "#ef4444" : "#374151"}`,
+                    borderRadius: "0.75rem",
+                    padding: "8px 24px",
+                    color: "#f3f4f6",
+                    fontSize: "0.875rem",
+                    outline: "none",
+                    opacity: isUploading ? 0.5 : 1,
+                    boxSizing: "border-box",
+                  }}
                 />
-                {errors.name && <p className="text-red-400 text-xs mt-1.5">{errors.name}</p>}
+                {errors.name && (
+                  <p style={{ color: "#f87171", fontSize: "12px", marginTop: "6px" }}>
+                    {errors.name}
+                  </p>
+                )}
               </div>
 
               {/* Description */}
-              <div className="mb-5">
-                <label className="block text-sm text-gray-400 mb-1.5">Description</label>
+              <div style={{ marginBottom: "20px" }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "0.875rem",
+                    color: "#9ca3af",
+                    marginBottom: "6px",
+                  }}
+                >
+                  Description
+                </label>
                 <textarea
                   value={description}
                   disabled={isUploading}
                   onChange={handleDescriptionChange}
                   rows={4}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-xl px-6 py-3 text-gray-100 focus:border-orange-500 focus:outline-none resize-none disabled:opacity-50"
+                  style={{
+                    width: "100%",
+                    backgroundColor: "#1f2937",
+                    border: "1px solid #374151",
+                    borderRadius: "0.75rem",
+                    padding: "12px 24px",
+                    color: "#f3f4f6",
+                    fontSize: "0.875rem",
+                    outline: "none",
+                    resize: "none",
+                    opacity: isUploading ? 0.5 : 1,
+                    boxSizing: "border-box",
+                  }}
                 />
-                <p className={`text-xs mt-1 text-right ${descRemaining <= 20 ? "text-orange-400" : "text-gray-500"}`}>
+                <p
+                  style={{
+                    fontSize: "12px",
+                    textAlign: "right",
+                    marginTop: "4px",
+                    color: descRemaining <= 20 ? "#fb923c" : "#6b7280",
+                  }}
+                >
                   {descRemaining} character{descRemaining !== 1 ? "s" : ""} remaining
                 </p>
               </div>
 
               {/* Language */}
-              <div className="mb-6">
-                <label className="block text-sm text-gray-400 mb-1.5">
-                  Language <span className="text-orange-500">*</span>
+              <div style={{ marginBottom: "24px" }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "0.875rem",
+                    color: "#9ca3af",
+                    marginBottom: "6px",
+                  }}
+                >
+                  Language <span style={{ color: "#f97316" }}>*</span>
                 </label>
                 <select
                   value={language}
                   disabled={isUploading}
                   onChange={(e) => {
                     setLanguage(e.target.value);
-                    if (e.target.value) setErrors((prev) => ({ ...prev, language: undefined }));
+                    if (e.target.value)
+                      setErrors((prev) => ({ ...prev, language: undefined }));
                   }}
-                  className={`w-full bg-gray-800 border rounded-xl px-5 py-3 text-gray-100 focus:outline-none transition-colors disabled:opacity-50 ${
-                    errors.language
-                      ? "border-red-500 focus:border-red-400"
-                      : "border-gray-700 focus:border-orange-500"
-                  }`}
+                  style={{
+                    width: "100%",
+                    backgroundColor: "#1f2937",
+                    border: `1px solid ${errors.language ? "#ef4444" : "#374151"}`,
+                    borderRadius: "0.75rem",
+                    padding: "12px 20px",
+                    color: "#f3f4f6",
+                    fontSize: "0.875rem",
+                    outline: "none",
+                    opacity: isUploading ? 0.5 : 1,
+                    boxSizing: "border-box",
+                  }}
                 >
-                  <option value="" disabled>Select a language...</option>
+                  <option value="" disabled>
+                    Select a language...
+                  </option>
                   {languageOptions.length === 0 ? (
                     <option disabled>Loading languages...</option>
                   ) : (
                     languageOptions.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
                     ))
                   )}
                 </select>
-                {errors.language && <p className="text-red-400 text-xs mt-1.5">{errors.language}</p>}
+                {errors.language && (
+                  <p style={{ color: "#f87171", fontSize: "12px", marginTop: "6px" }}>
+                    {errors.language}
+                  </p>
+                )}
               </div>
 
               {/* Upload status banner */}
               {uploadStatus !== "idle" && (
                 <div
-                  className={`mb-4 flex items-center gap-2 text-sm rounded-xl px-4 py-2.5 ${
-                    uploadStatus === "uploading"
-                      ? "bg-orange-950/60 border border-orange-700 text-orange-300"
-                      : uploadStatus === "success"
-                      ? "bg-green-950/60 border border-green-700 text-green-300"
-                      : "bg-red-950/60 border border-red-700 text-red-300"
-                  }`}
+                  style={{
+                    marginBottom: "16px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    fontSize: "0.875rem",
+                    borderRadius: "0.75rem",
+                    padding: "10px 16px",
+                    backgroundColor:
+                      uploadStatus === "uploading"
+                        ? "rgba(67,20,7,0.6)"
+                        : uploadStatus === "success"
+                        ? "rgba(2,44,34,0.6)"
+                        : "rgba(69,10,10,0.6)",
+                    border:
+                      uploadStatus === "uploading"
+                        ? "1px solid #c2410c"
+                        : uploadStatus === "success"
+                        ? "1px solid #15803d"
+                        : "1px solid #b91c1c",
+                    color:
+                      uploadStatus === "uploading"
+                        ? "#fdba74"
+                        : uploadStatus === "success"
+                        ? "#86efac"
+                        : "#fca5a5",
+                  }}
                 >
                   {uploadStatus === "uploading" && (
-                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <Loader2
+                      size={16}
+                      style={{ animation: "spin 1s linear infinite", flexShrink: 0 }}
+                    />
                   )}
                   {uploadStatus === "success" && (
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
                   )}
                   {uploadStatus === "error" && (
-                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <AlertCircle size={16} style={{ flexShrink: 0 }} />
                   )}
                   <span>{uploadMessage}</span>
                 </div>
@@ -406,23 +668,50 @@ export default function NewCollectionModal({
               <button
                 type="submit"
                 disabled={isUploading || uploadStatus === "success"}
-                className="mt-auto px-6 py-3 bg-gradient-to-r from-orange-600 to-amber-600 rounded-xl text-white font-semibold text-sm hover:scale-[1.02] active:scale-95 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100 flex items-center justify-center gap-2"
+                style={{
+                  marginTop: "auto",
+                  padding: "12px 24px",
+                  background: "linear-gradient(to right, #ea580c, #d97706)",
+                  border: "none",
+                  borderRadius: "0.75rem",
+                  color: "#fff",
+                  fontWeight: 600,
+                  fontSize: "0.875rem",
+                  cursor:
+                    isUploading || uploadStatus === "success"
+                      ? "not-allowed"
+                      : "pointer",
+                  opacity: isUploading || uploadStatus === "success" ? 0.6 : 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                }}
               >
                 {isUploading ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2
+                      size={16}
+                      style={{ animation: "spin 1s linear infinite" }}
+                    />
                     Uploading…
                   </>
                 ) : (
                   "Process Files"
                 )}
               </button>
-
             </form>
           </div>
-
         </div>
       </div>
+
+      {/* Keyframe for spinner */}
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }

@@ -51,23 +51,12 @@ export default function Home() {
             </p>
 
             <p className="text-lg md:text-xl text-gray-300 mt-6 max-w-2xl mx-auto">
-              High-accuracy OCR for Handwritten, Printed, and Scene text
+              High-accuracy OCR for Printed
             </p>
           </div>
 
           {/* CTA Buttons */}
           <div className="flex flex-col sm:flex-row flex-wrap justify-center items-center gap-6 md:gap-10 lg:gap-14 mt-32">
-            <Link
-              href="/handwritten"
-              className="px-10 py-5 rounded-xl text-lg font-semibold transition-all duration-300 shadow-xl
-                bg-gray-800/70 text-gray-200 border border-gray-700
-                hover:bg-orange-600 hover:text-white hover:border-orange-400
-                hover:shadow-orange-900/50 hover:scale-105
-                active:scale-95"
-            >
-              Handwritten Text
-            </Link>
-
             <Link
               href="/printed"
               className="px-10 py-5 rounded-xl text-lg font-semibold transition-all duration-300 shadow-xl
@@ -77,17 +66,6 @@ export default function Home() {
                 active:scale-95"
             >
               Printed Text
-            </Link>
-
-            <Link
-              href="/scene"
-              className="px-10 py-5 rounded-xl text-lg font-semibold transition-all duration-300 shadow-xl
-                bg-gray-800/70 text-gray-200 border border-gray-700
-                hover:bg-orange-600 hover:text-white hover:border-orange-400
-                hover:shadow-orange-900/50 hover:scale-105
-                active:scale-95"
-            >
-              Scene Text
             </Link>
           </div>
         </div>

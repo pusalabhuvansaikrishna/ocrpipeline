@@ -23,22 +23,24 @@ export default function DashboardHeader({
     <header className="fixed top-0 left-0 right-0 z-50 bg-gray-900/70 backdrop-blur-md border-b border-gray-800">
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         {/* Logo + Brand */}
-        <div className="flex items-center gap-3">
+        <div
+          className="flex items-center gap-3 cursor-pointer"
+          onClick={() => window.location.reload()}
+        >
           <Image
             src="/IIIT_Hyderabad_Logo.png"
             alt="IIITH Logo"
-            width={56}
-            height={56}
+            width={200}
+            height={200}
             className="h-14 w-auto"
+            quality={100}
+            priority
           />
-          <span className="text-xl font-semibold text-orange-400 tracking-tight">
-            Vishva Setu
-          </span>
         </div>
 
         {/* Right Side Actions */}
         <div className="flex items-center gap-4">
-          {/* Create Collection Button - Unchanged */}
+          {/* Create Collection Button */}
           <button
             onClick={onCreateCollection}
             className="px-6 py-2.5 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 rounded-xl font-semibold text-sm transition-all hover:scale-[1.02] active:scale-95 shadow-lg shadow-orange-900/30 flex items-center gap-2"
@@ -53,7 +55,7 @@ export default function DashboardHeader({
                 onClick={() => setShowDropdown(!showDropdown)}
                 className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-full p-1 pr-3 transition-all hover:border-orange-500/50 group"
               >
-                {/* Profile Picture - Strongly Reduced Size */}
+                {/* Profile Picture */}
                 {hasPhoto ? (
                   <img
                     src={user.photo}
