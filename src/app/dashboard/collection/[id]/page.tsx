@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   FileText,
   Clock,
@@ -321,7 +321,6 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
     ocrHtmlUrl = getFullUrl(apiBase, ocrPath);
   }
 
-  // Use the SAME proxy that already works for images → this fixes CORS issues
   const downloadProxyUrl = ocrHtmlUrl
     ? `/api/image-proxy?url=${encodeURIComponent(ocrHtmlUrl)}`
     : "";
@@ -329,14 +328,12 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
   const status = doc.status.toLowerCase();
   const { bg: stBg, fg: stFg, Icon: StatusIcon } = statusMeta(doc.status);
 
-  /* FIXED + IMPROVED DOWNLOAD HANDLER */
   const handleDownloadOCR = async () => {
     if (!ocrHtmlUrl || !downloadProxyUrl) return;
 
     const downloadBtn = document.getElementById("ocr-download-btn") as HTMLButtonElement | null;
     const originalHTML = downloadBtn?.innerHTML || "";
 
-    // Show loading state
     if (downloadBtn) {
       downloadBtn.style.pointerEvents = "none";
       downloadBtn.innerHTML = `
@@ -350,33 +347,23 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
     }
 
     try {
-      const res = await fetch(downloadProxyUrl, {
-        credentials: "include",
-      });
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status} ${res.statusText}`);
-      }
+      const res = await fetch(downloadProxyUrl, { credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
 
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
-
       const link = document.createElement("a");
       link.href = blobUrl;
-
       const baseName = (doc.file_name || "document").replace(/\.[^/.]+$/, "");
       link.download = `${baseName}.html`;
-
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-
       URL.revokeObjectURL(blobUrl);
     } catch (err: any) {
       console.error("Download failed:", err);
-      alert(`Could not download the OCR file.\n\nError: ${err.message}\n\nPlease check the browser console (F12) for full details.`);
+      alert(`Could not download the OCR file.\n\nError: ${err.message}`);
     } finally {
-      // Restore button
       if (downloadBtn) {
         downloadBtn.style.pointerEvents = "auto";
         downloadBtn.innerHTML = originalHTML;
@@ -444,7 +431,6 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
             flexShrink: 0,
           }}
         >
-          {/* Left side */}
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div
               style={{
@@ -473,9 +459,7 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
             </p>
           </div>
 
-          {/* Right side: Download button + Status */}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {/* Download button – appears only when completed */}
             {status === "completed" && ocrHtmlUrl && (
               <button
                 id="ocr-download-btn"
@@ -507,7 +491,6 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
               </button>
             )}
 
-            {/* Status badge */}
             <span
               style={{
                 backgroundColor: stBg,
@@ -536,7 +519,6 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
               sub="OCR hasn't started yet. Check back shortly."
             />
           )}
-
           {status === "processing" && (
             <Placeholder
               icon={<Loader2 size={32} style={{ color: "#93c5fd" }} className="animate-spin" />}
@@ -544,7 +526,6 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
               sub="OCR is running. Text will appear here when complete."
             />
           )}
-
           {status === "completed" && ocrHtmlUrl && (
             <iframe
               key={ocrHtmlUrl}
@@ -560,7 +541,6 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
               allowFullScreen
             />
           )}
-
           {status === "completed" && !ocrHtmlUrl && (
             <Placeholder
               icon={<FileSearch size={32} style={{ color: "#475569" }} />}
@@ -568,7 +548,6 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
               sub="The HTML output file could not be located for this document."
             />
           )}
-
           {status !== "queued" && status !== "processing" && status !== "completed" && (
             <Placeholder
               icon={<AlertCircle size={32} style={{ color: "#f87171" }} />}
@@ -587,15 +566,38 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
 ═══════════════════════════════════════════════ */
 export default function CollectionDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const id = params?.id as string;
   const [documents, setDocuments] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Doc | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [user, setUser] = useState<{ name?: string; email: string; photo?: string } | null>(null);
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+  // Fetch current logged-in user
+  useEffect(() => {
+    fetch(`${API_BASE}/auth/me`, { credentials: "include" })
+      .then((res) => {
+        if (!res.ok) throw new Error("Not authenticated");
+        return res.json();
+      })
+      .then((data) => setUser(data))
+      .catch(() => router.push("/printed"));
+  }, [API_BASE]);
+
+  // Logout handler
+  const onLogout = async () => {
+    await fetch(`${API_BASE}/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+    router.push("/printed");
+  };
+
+  // Fetch documents
   useEffect(() => {
     if (!id) return;
     setError(null);
@@ -645,7 +647,7 @@ export default function CollectionDetailPage() {
         }
       `}</style>
 
-      <Header />
+      <Header user={user} onLogout={onLogout} />
 
       <div
         style={{

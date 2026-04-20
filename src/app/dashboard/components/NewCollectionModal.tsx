@@ -20,6 +20,48 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_DESC_LENGTH = 150;
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// Dynamically import JSZip only when needed
+async function extractZip(zipFile: File): Promise<File[]> {
+  // @ts-ignore – jszip is a peer dep; add "jszip" to your package.json
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(zipFile);
+  const extracted: File[] = [];
+
+  await Promise.all(
+    Object.entries(zip.files).map(async ([relativePath, zipEntry]) => {
+      // Skip directories and macOS metadata files
+      if (zipEntry.dir) return;
+      if (relativePath.startsWith("__MACOSX/") || relativePath.includes("/.")) return;
+
+      const blob = await zipEntry.async("blob");
+      const fileName = relativePath.split("/").pop() ?? relativePath;
+
+      // Infer MIME type from extension
+      const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+      const mimeMap: Record<string, string> = {
+        png: "image/png",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        gif: "image/gif",
+        webp: "image/webp",
+        pdf: "application/pdf",
+        txt: "text/plain",
+        csv: "text/csv",
+      };
+      const mime = mimeMap[ext] ?? "application/octet-stream";
+
+      const file = new File([blob], fileName, { type: mime });
+      if (file.size <= MAX_FILE_SIZE) {
+        extracted.push(file);
+      } else {
+        alert(`⚠️ ${fileName} (inside ZIP) is larger than 10 MB and was skipped.`);
+      }
+    })
+  );
+
+  return extracted;
+}
+
 export default function NewCollectionModal({
   isOpen,
   onClose,
@@ -32,6 +74,7 @@ export default function NewCollectionModal({
   const [files, setFiles] = useState<File[]>([]);
   const [btnPopped, setBtnPopped] = useState(false);
   const [errors, setErrors] = useState<{ name?: string; language?: string }>({});
+  const [extracting, setExtracting] = useState(false);
 
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [uploadMessage, setUploadMessage] = useState<string>("");
@@ -52,43 +95,59 @@ export default function NewCollectionModal({
 
   useEffect(() => {
     if (!isOpen) {
-      // Reset form fields
       setName("");
       setDescription("");
       setLanguage("");
       setFiles([]);
       setErrors({});
-      // Reset upload state
       setUploadStatus("idle");
       setUploadMessage("");
       setUploadedBlobs([]);
       setFailedFiles([]);
+      setExtracting(false);
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const filterValidFiles = (fileList: FileList | File[]): File[] => {
-    return Array.from(fileList).filter((file) => {
-      if (file.size > MAX_FILE_SIZE) {
-        alert(`⚠️ ${file.name} is larger than 10 MB and was skipped.`);
-        return false;
+  // ─── Process a raw FileList/array: extract ZIPs, filter oversized files ───
+  const processIncomingFiles = async (incoming: FileList | File[]) => {
+    setExtracting(true);
+    const result: File[] = [];
+
+    for (const file of Array.from(incoming)) {
+      if (file.name.toLowerCase().endsWith(".zip") || file.type === "application/zip" || file.type === "application/x-zip-compressed") {
+        try {
+          const extracted = await extractZip(file);
+          result.push(...extracted);
+        } catch (err) {
+          console.error(`Failed to extract ${file.name}:`, err);
+          alert(`⚠️ Could not extract ${file.name}. Is it a valid ZIP?`);
+        }
+      } else {
+        if (file.size > MAX_FILE_SIZE) {
+          alert(`⚠️ ${file.name} is larger than 10 MB and was skipped.`);
+        } else {
+          result.push(file);
+        }
       }
-      return true;
-    });
+    }
+
+    setFiles((prev) => [...prev, ...result]);
+    setExtracting(false);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const validFiles = filterValidFiles(e.target.files);
-      setFiles((prev) => [...prev, ...validFiles]);
+      processIncomingFiles(e.target.files);
+      // Reset input so the same file can be re-selected
+      e.target.value = "";
     }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    const validFiles = filterValidFiles(e.dataTransfer.files);
-    setFiles((prev) => [...prev, ...validFiles]);
+    processIncomingFiles(e.dataTransfer.files);
   };
 
   const removeFile = (index: number) => {
@@ -174,6 +233,7 @@ export default function NewCollectionModal({
 
   const descRemaining = MAX_DESC_LENGTH - description.length;
   const isUploading = uploadStatus === "uploading";
+  const isBusy = isUploading || extracting;
 
   return (
     <div
@@ -189,7 +249,6 @@ export default function NewCollectionModal({
         backdropFilter: "blur(6px)",
       }}
     >
-      {/* Modal shell — fixed height so it never grows beyond viewport */}
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
@@ -206,7 +265,7 @@ export default function NewCollectionModal({
           overflow: "hidden",
         }}
       >
-        {/* Header — pinned, never scrolls */}
+        {/* Header */}
         <div
           style={{
             flexShrink: 0,
@@ -222,12 +281,12 @@ export default function NewCollectionModal({
           </h2>
           <button
             onClick={onClose}
-            disabled={isUploading}
+            disabled={isBusy}
             style={{
               background: "none",
               border: "none",
-              cursor: isUploading ? "not-allowed" : "pointer",
-              opacity: isUploading ? 0.4 : 1,
+              cursor: isBusy ? "not-allowed" : "pointer",
+              opacity: isBusy ? 0.4 : 1,
               color: "#9ca3af",
               padding: 0,
               display: "flex",
@@ -237,10 +296,10 @@ export default function NewCollectionModal({
           </button>
         </div>
 
-        {/* Body — fills remaining height; each column scrolls independently */}
+        {/* Body */}
         <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
 
-          {/* ── LEFT: upload zone + scrollable file list ── */}
+          {/* LEFT: upload zone + file list */}
           <div
             style={{
               width: "40%",
@@ -252,13 +311,12 @@ export default function NewCollectionModal({
               overflow: "hidden",
             }}
           >
-            {/* Inner dark card */}
             <div
               style={{
                 display: "flex",
                 flexDirection: "column",
                 flex: 1,
-                minHeight: 0,         /* essential — lets child flex scroll */
+                minHeight: 0,
                 backgroundColor: "#030712",
                 border: "1px solid #374151",
                 borderRadius: "1rem",
@@ -278,7 +336,7 @@ export default function NewCollectionModal({
                 Upload Here
               </p>
 
-              {/* Drag-and-drop zone — fixed, never shrinks */}
+              {/* Drop zone */}
               <div
                 onDrop={handleDrop}
                 onDragOver={(e) => e.preventDefault()}
@@ -294,45 +352,65 @@ export default function NewCollectionModal({
                   textAlign: "center",
                 }}
               >
-                <Upload size={40} style={{ color: "#fef3c7", marginBottom: "16px" }} />
-                <p style={{ margin: "0 0 16px", fontSize: "0.875rem", color: "#e5e7eb" }}>
-                  Drag &amp; drop files here
-                </p>
+                {extracting ? (
+                  <>
+                    <Loader2
+                      size={40}
+                      style={{
+                        color: "#fb923c",
+                        marginBottom: "16px",
+                        animation: "spin 1s linear infinite",
+                      }}
+                    />
+                    <p style={{ margin: 0, fontSize: "0.875rem", color: "#e5e7eb" }}>
+                      Extracting ZIP…
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <Upload size={40} style={{ color: "#fef3c7", marginBottom: "16px" }} />
+                    <p style={{ margin: "0 0 16px", fontSize: "0.875rem", color: "#e5e7eb" }}>
+                      Drag &amp; drop files here
+                    </p>
 
-                <button
-                  type="button"
-                  onClick={handleSelectClick}
-                  disabled={isUploading}
-                  style={{
-                    padding: "10px 24px",
-                    backgroundColor: "#ea580c",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: "0.5rem",
-                    fontSize: "0.875rem",
-                    cursor: isUploading ? "not-allowed" : "pointer",
-                    opacity: isUploading ? 0.5 : 1,
-                    transform: btnPopped ? "scale(0.92)" : "scale(1)",
-                    boxShadow: btnPopped
-                      ? "0 0 0 4px rgba(234,88,12,0.35)"
-                      : "0 2px 8px rgba(0,0,0,0.3)",
-                    transition:
-                      "transform 0.15s cubic-bezier(.36,.07,.19,.97), box-shadow 0.15s ease",
-                  }}
-                >
-                  Select Files / ZIP
-                </button>
+                    <button
+                      type="button"
+                      onClick={handleSelectClick}
+                      disabled={isBusy}
+                      style={{
+                        padding: "10px 24px",
+                        backgroundColor: "#ea580c",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "0.5rem",
+                        fontSize: "0.875rem",
+                        cursor: isBusy ? "not-allowed" : "pointer",
+                        opacity: isBusy ? 0.5 : 1,
+                        transform: btnPopped ? "scale(0.92)" : "scale(1)",
+                        boxShadow: btnPopped
+                          ? "0 0 0 4px rgba(234,88,12,0.35)"
+                          : "0 2px 8px rgba(0,0,0,0.3)",
+                        transition:
+                          "transform 0.15s cubic-bezier(.36,.07,.19,.97), box-shadow 0.15s ease",
+                      }}
+                    >
+                      Select Files / ZIP
+                    </button>
 
-                <p
-                  style={{
-                    margin: "16px 0 0",
-                    fontSize: "11px",
-                    color: "#6b7280",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  JPG, PNG, PDF, ZIP • max 10 MB
-                </p>
+                    <p
+                      style={{
+                        margin: "16px 0 0",
+                        fontSize: "11px",
+                        color: "#6b7280",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      JPG, PNG, PDF, ZIP • max 10 MB
+                      <br />
+                      <span style={{ color: "#4b5563" }}>ZIPs are extracted automatically</span>
+                    </p>
+                  </>
+                )}
 
                 <input
                   ref={fileInputRef}
@@ -344,14 +422,14 @@ export default function NewCollectionModal({
                 />
               </div>
 
-              {/* File list — scrollable, takes all leftover space */}
+              {/* File list */}
               {files.length > 0 && (
                 <div
                   style={{
                     display: "flex",
                     flexDirection: "column",
                     flex: 1,
-                    minHeight: 0,     /* critical for scroll to work */
+                    minHeight: 0,
                     marginTop: "12px",
                     overflow: "hidden",
                   }}
@@ -367,7 +445,6 @@ export default function NewCollectionModal({
                     {files.length} file{files.length !== 1 ? "s" : ""} selected
                   </p>
 
-                  {/* Scrollable list */}
                   <div
                     style={{
                       flex: 1,
@@ -408,15 +485,9 @@ export default function NewCollectionModal({
                           }}
                         >
                           {file.type.includes("image") ? (
-                            <ImageIcon
-                              size={14}
-                              style={{ color: "#fb923c", flexShrink: 0 }}
-                            />
+                            <ImageIcon size={14} style={{ color: "#fb923c", flexShrink: 0 }} />
                           ) : (
-                            <FileText
-                              size={14}
-                              style={{ color: "#fb923c", flexShrink: 0 }}
-                            />
+                            <FileText size={14} style={{ color: "#fb923c", flexShrink: 0 }} />
                           )}
                           <span
                             style={{
@@ -431,26 +502,20 @@ export default function NewCollectionModal({
                           </span>
 
                           {wasUploaded && (
-                            <CheckCircle2
-                              size={12}
-                              style={{ color: "#4ade80", flexShrink: 0 }}
-                            />
+                            <CheckCircle2 size={12} style={{ color: "#4ade80", flexShrink: 0 }} />
                           )}
                           {hasFailed && (
-                            <AlertCircle
-                              size={12}
-                              style={{ color: "#f87171", flexShrink: 0 }}
-                            />
+                            <AlertCircle size={12} style={{ color: "#f87171", flexShrink: 0 }} />
                           )}
                           {!wasUploaded && !hasFailed && (
                             <button
                               onClick={() => removeFile(i)}
-                              disabled={isUploading}
+                              disabled={isBusy}
                               style={{
                                 background: "none",
                                 border: "none",
                                 padding: 0,
-                                cursor: isUploading ? "not-allowed" : "pointer",
+                                cursor: isBusy ? "not-allowed" : "pointer",
                                 display: "flex",
                               }}
                             >
@@ -466,7 +531,7 @@ export default function NewCollectionModal({
             </div>
           </div>
 
-          {/* ── RIGHT: form, scrolls if viewport is short ── */}
+          {/* RIGHT: form */}
           <div
             style={{
               flex: 1,
@@ -490,12 +555,11 @@ export default function NewCollectionModal({
                     marginBottom: "6px",
                   }}
                 >
-                  Collection Name{" "}
-                  <span style={{ color: "#f97316" }}>*</span>
+                  Collection Name <span style={{ color: "#f97316" }}>*</span>
                 </label>
                 <input
                   value={name}
-                  disabled={isUploading}
+                  disabled={isBusy}
                   onChange={(e) => {
                     setName(e.target.value);
                     if (e.target.value.trim())
@@ -510,7 +574,7 @@ export default function NewCollectionModal({
                     color: "#f3f4f6",
                     fontSize: "0.875rem",
                     outline: "none",
-                    opacity: isUploading ? 0.5 : 1,
+                    opacity: isBusy ? 0.5 : 1,
                     boxSizing: "border-box",
                   }}
                 />
@@ -535,7 +599,7 @@ export default function NewCollectionModal({
                 </label>
                 <textarea
                   value={description}
-                  disabled={isUploading}
+                  disabled={isBusy}
                   onChange={handleDescriptionChange}
                   rows={4}
                   style={{
@@ -548,7 +612,7 @@ export default function NewCollectionModal({
                     fontSize: "0.875rem",
                     outline: "none",
                     resize: "none",
-                    opacity: isUploading ? 0.5 : 1,
+                    opacity: isBusy ? 0.5 : 1,
                     boxSizing: "border-box",
                   }}
                 />
@@ -578,7 +642,7 @@ export default function NewCollectionModal({
                 </label>
                 <select
                   value={language}
-                  disabled={isUploading}
+                  disabled={isBusy}
                   onChange={(e) => {
                     setLanguage(e.target.value);
                     if (e.target.value)
@@ -593,7 +657,7 @@ export default function NewCollectionModal({
                     color: "#f3f4f6",
                     fontSize: "0.875rem",
                     outline: "none",
-                    opacity: isUploading ? 0.5 : 1,
+                    opacity: isBusy ? 0.5 : 1,
                     boxSizing: "border-box",
                   }}
                 >
@@ -667,7 +731,7 @@ export default function NewCollectionModal({
               {/* Submit */}
               <button
                 type="submit"
-                disabled={isUploading || uploadStatus === "success"}
+                disabled={isBusy || uploadStatus === "success"}
                 style={{
                   marginTop: "auto",
                   padding: "12px 24px",
@@ -678,10 +742,8 @@ export default function NewCollectionModal({
                   fontWeight: 600,
                   fontSize: "0.875rem",
                   cursor:
-                    isUploading || uploadStatus === "success"
-                      ? "not-allowed"
-                      : "pointer",
-                  opacity: isUploading || uploadStatus === "success" ? 0.6 : 1,
+                    isBusy || uploadStatus === "success" ? "not-allowed" : "pointer",
+                  opacity: isBusy || uploadStatus === "success" ? 0.6 : 1,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -690,11 +752,13 @@ export default function NewCollectionModal({
               >
                 {isUploading ? (
                   <>
-                    <Loader2
-                      size={16}
-                      style={{ animation: "spin 1s linear infinite" }}
-                    />
+                    <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
                     Uploading…
+                  </>
+                ) : extracting ? (
+                  <>
+                    <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+                    Extracting…
                   </>
                 ) : (
                   "Process Files"
@@ -705,7 +769,6 @@ export default function NewCollectionModal({
         </div>
       </div>
 
-      {/* Keyframe for spinner */}
       <style>{`
         @keyframes spin {
           from { transform: rotate(0deg); }
