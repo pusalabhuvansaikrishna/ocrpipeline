@@ -5,7 +5,8 @@ import Link from "next/link";
 
 export default function PrintedHeader() {
   const handleGoogleLogin = () => {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    /*const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";*/
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://10-4-16-36.nip.io:8003";
     window.location.href = `${API_BASE}/auth/google/login`;
   };
 
