@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { ChevronDown, LogOut } from "lucide-react";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 type DashboardHeaderProps = {
   user: { name?: string; email: string; photo?: string } | null;
@@ -16,6 +17,7 @@ export default function DashboardHeader({
   onCreateCollection,
 }: DashboardHeaderProps) {
   const [showDropdown, setShowDropdown] = useState(false);
+  const router = useRouter();
 
   const hasPhoto = !!user?.photo;
 
@@ -25,7 +27,7 @@ export default function DashboardHeader({
         {/* Logo + Brand */}
         <div
           className="flex items-center gap-3 cursor-pointer"
-          onClick={() => window.location.reload()}
+          onClick={() => router.push("/dashboard")}
         >
           <Image
             src="/IIIT_Hyderabad_Logo.png"

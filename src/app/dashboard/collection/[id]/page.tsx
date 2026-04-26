@@ -15,6 +15,8 @@ import {
   FileJson,
   FileType,
   Download,
+  RotateCcw,
+  X,
 } from "lucide-react";
 import Header from "../../components/Header";
 
@@ -38,6 +40,7 @@ type Doc = {
 const SIDEBAR_W = 300;
 const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "svg", "avif"]);
 const PDF_EXTS = new Set(["pdf"]);
+const REASON_MAX = 1000;
 
 /* ═══════════════════════════════════════════════
    HELPERS
@@ -74,6 +77,346 @@ function getOcrHtmlPath(filePath: string): string {
 }
 
 /* ═══════════════════════════════════════════════
+   RESUBMIT MODAL
+═══════════════════════════════════════════════ */
+function ResubmitModal({
+  doc,
+  apiBase,
+  onClose,
+}: {
+  doc: Doc;
+  apiBase: string;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  const remaining = REASON_MAX - reason.length;
+  const isOverLimit = remaining < 0;
+  const isEmpty = reason.trim().length === 0;
+
+  const handleResubmit = async () => {
+    if (isEmpty || isOverLimit || submitting) return;
+
+    setSubmitting(true);
+    setSubmitError(null);
+
+    try {
+      const params = new URLSearchParams({
+        document_id: String(doc.document_id),
+        user_reason: reason.trim(),
+      });
+
+      const res = await fetch(`${apiBase}/review-tasks?${params.toString()}`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || `Request failed with status ${res.status}`);
+      }
+
+      setSubmitSuccess(true);
+      setTimeout(() => onClose(), 1500);
+    } catch (err: any) {
+      setSubmitError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleBackdrop = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={handleBackdrop}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        backgroundColor: "rgba(0,0,0,0.65)",
+        backdropFilter: "blur(4px)",
+        WebkitBackdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+        animation: "fadeIn 0.15s ease",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 480,
+          backgroundColor: "#0d1626",
+          borderRadius: 14,
+          border: "1px solid #1e293b",
+          boxShadow: "0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px rgba(99,102,241,0.08)",
+          overflow: "hidden",
+          animation: "slideUp 0.18s ease",
+        }}
+      >
+        {/* Modal Header */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "16px 20px",
+            borderBottom: "1px solid #1e293b",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                backgroundColor: "rgba(234,179,8,0.12)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <RotateCcw size={15} style={{ color: "#fde047" }} />
+            </div>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", margin: 0 }}>
+                Resubmit for OCR
+              </p>
+              <p
+                style={{
+                  fontSize: 11,
+                  color: "#475569",
+                  margin: 0,
+                  marginTop: 1,
+                  maxWidth: 300,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {doc.file_name}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              all: "unset",
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              color: "#475569",
+              backgroundColor: "transparent",
+              transition: "background-color 0.15s, color 0.15s",
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(239,68,68,0.1)";
+              (e.currentTarget as HTMLElement).style.color = "#f87171";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
+              (e.currentTarget as HTMLElement).style.color = "#475569";
+            }}
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div style={{ padding: "20px 20px 24px" }}>
+
+          {submitSuccess && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                backgroundColor: "rgba(34,197,94,0.1)",
+                border: "1px solid rgba(34,197,94,0.25)",
+                borderRadius: 10,
+                padding: "12px 14px",
+                marginBottom: 16,
+              }}
+            >
+              <CheckCircle size={16} style={{ color: "#86efac", flexShrink: 0 }} />
+              <p style={{ fontSize: 13, color: "#86efac", margin: 0, fontWeight: 600 }}>
+                Resubmitted successfully!
+              </p>
+            </div>
+          )}
+
+          {submitError && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+                backgroundColor: "rgba(239,68,68,0.1)",
+                border: "1px solid rgba(239,68,68,0.25)",
+                borderRadius: 10,
+                padding: "12px 14px",
+                marginBottom: 16,
+              }}
+            >
+              <AlertCircle size={16} style={{ color: "#f87171", flexShrink: 0, marginTop: 1 }} />
+              <p style={{ fontSize: 13, color: "#fca5a5", margin: 0 }}>{submitError}</p>
+            </div>
+          )}
+
+          <label
+            htmlFor="resubmit-reason"
+            style={{
+              display: "block",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "#94a3b8",
+              marginBottom: 8,
+              letterSpacing: "0.03em",
+            }}
+          >
+            Reason for resubmission
+            <span style={{ color: "#f87171", marginLeft: 3 }}>*</span>
+          </label>
+
+          <div style={{ position: "relative" }}>
+            <textarea
+              id="resubmit-reason"
+              value={reason}
+              onChange={(e) => {
+                setReason(e.target.value);
+                if (submitError) setSubmitError(null);
+              }}
+              disabled={submitting || submitSuccess}
+              placeholder="Describe what was wrong with the OCR output — e.g. missing text, incorrect characters, layout issues…"
+              rows={5}
+              style={{
+                width: "100%",
+                resize: "vertical",
+                backgroundColor: "#060b14",
+                border: `1.5px solid ${isOverLimit ? "rgba(239,68,68,0.5)" : "#1e293b"}`,
+                borderRadius: 10,
+                color: "#e2e8f0",
+                fontSize: 13,
+                lineHeight: 1.6,
+                padding: "12px 14px",
+                outline: "none",
+                fontFamily: "'DM Sans','Segoe UI',sans-serif",
+                boxSizing: "border-box",
+                transition: "border-color 0.15s",
+                minHeight: 120,
+                opacity: submitting || submitSuccess ? 0.5 : 1,
+              }}
+              onFocus={(e) => {
+                if (!isOverLimit)
+                  (e.currentTarget as HTMLElement).style.borderColor = "rgba(99,102,241,0.5)";
+              }}
+              onBlur={(e) => {
+                if (!isOverLimit)
+                  (e.currentTarget as HTMLElement).style.borderColor = "#1e293b";
+              }}
+            />
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 500,
+                color: isOverLimit ? "#f87171" : remaining <= 100 ? "#fde047" : "#334155",
+                transition: "color 0.15s",
+              }}
+            >
+              {remaining < 0 ? `${Math.abs(remaining)} over limit` : `${remaining} characters remaining`}
+            </span>
+          </div>
+
+          <button
+            onClick={handleResubmit}
+            disabled={isEmpty || isOverLimit || submitting || submitSuccess}
+            style={{
+              all: "unset",
+              marginTop: 16,
+              width: "100%",
+              boxSizing: "border-box",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              backgroundColor:
+                isEmpty || isOverLimit || submitting || submitSuccess
+                  ? "rgba(234,179,8,0.05)"
+                  : "rgba(234,179,8,0.14)",
+              color:
+                isEmpty || isOverLimit || submitting || submitSuccess
+                  ? "#4b4416"
+                  : "#fde047",
+              fontSize: 13,
+              fontWeight: 700,
+              padding: "11px 20px",
+              borderRadius: 10,
+              cursor:
+                isEmpty || isOverLimit || submitting || submitSuccess
+                  ? "not-allowed"
+                  : "pointer",
+              border: `1.5px solid ${
+                isEmpty || isOverLimit || submitting || submitSuccess
+                  ? "rgba(234,179,8,0.08)"
+                  : "rgba(234,179,8,0.2)"
+              }`,
+              transition: "background-color 0.15s, color 0.15s, border-color 0.15s",
+              letterSpacing: "0.02em",
+            }}
+            onMouseEnter={(e) => {
+              if (!isEmpty && !isOverLimit && !submitting && !submitSuccess)
+                (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(234,179,8,0.22)";
+            }}
+            onMouseLeave={(e) => {
+              if (!isEmpty && !isOverLimit && !submitting && !submitSuccess)
+                (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(234,179,8,0.14)";
+            }}
+          >
+            {submitting ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Submitting…
+              </>
+            ) : (
+              <>
+                <RotateCcw size={14} />
+                Resubmit to OCR
+              </>
+            )}
+          </button>
+
+          <p style={{ fontSize: 11, color: "#334155", textAlign: "center", marginTop: 10, marginBottom: 0 }}>
+            The document will be re-queued and processed again.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
    SIDEBAR TILE
 ═══════════════════════════════════════════════ */
 function FileTile({ doc, isActive, onClick, apiBase }: {
@@ -85,7 +428,6 @@ function FileTile({ doc, isActive, onClick, apiBase }: {
   const [imgErr, setImgErr] = useState(false);
   const e = ext(doc);
   const isImg = IMAGE_EXTS.has(e) && !!doc.file_path;
-  const isPdf = PDF_EXTS.has(e) && !!doc.file_path;
   const { bg: stBg, fg: stFg, Icon: StatusIcon } = statusMeta(doc.status);
 
   const fullFileUrl = getFullUrl(apiBase, doc.file_path);
@@ -138,6 +480,7 @@ function FileTile({ doc, isActive, onClick, apiBase }: {
           justifyContent: "center",
         }}
       >
+        {/* Image thumbnail */}
         {isImg && !imgErr && thumbnailSrc && (
           <img
             src={thumbnailSrc}
@@ -147,26 +490,8 @@ function FileTile({ doc, isActive, onClick, apiBase }: {
           />
         )}
 
-        {isPdf && fullFileUrl && (
-          <>
-            <div style={{ position: "absolute", inset: 0, overflow: "hidden", backgroundColor: "#fff" }}>
-              <iframe
-                src={`${fullFileUrl}#toolbar=0&navpanes=0&scrollbar=0&page=1`}
-                style={{
-                  width: "600px",
-                  height: "800px",
-                  border: "none",
-                  transformOrigin: "top left",
-                  transform: "scale(0.5)",
-                  pointerEvents: "none",
-                }}
-              />
-            </div>
-            <div style={{ position: "absolute", inset: 0, zIndex: 1 }} />
-          </>
-        )}
-
-        {(!isImg || imgErr) && !isPdf && (
+        {/* Icon placeholder for all non-image files (including PDFs) */}
+        {(!isImg || imgErr) && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
             <theme.Icon size={32} style={{ color: theme.accent, opacity: 0.9 }} />
             <span
@@ -301,18 +626,35 @@ function Placeholder({
 /* ═══════════════════════════════════════════════
    DOCUMENT VIEWER
 ═══════════════════════════════════════════════ */
-function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
+function DocumentViewer({
+  doc,
+  apiBase,
+  userTier,
+}: {
+  doc: Doc;
+  apiBase: string;
+  userTier?: string;
+}) {
+  const [resubmitOpen, setResubmitOpen] = useState(false);
+
+  // ── PDF blob state (fixes download & rendering issues) ──
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
   const e = ext(doc);
   const isImg = IMAGE_EXTS.has(e);
   const isPdf = PDF_EXTS.has(e);
 
   const fullFileUrl = getFullUrl(apiBase, doc.file_path);
 
-  const imageSrc = isImg && fullFileUrl
+  // Route all file fetches through the image proxy to avoid CORS / Content-Disposition issues
+  const proxyFileUrl = fullFileUrl
     ? `/api/image-proxy?url=${encodeURIComponent(fullFileUrl)}`
     : "";
 
-  // OCR URL
+  const imageSrc = isImg && proxyFileUrl ? proxyFileUrl : "";
+
   let ocrHtmlUrl = "";
   if (doc.ocr_url && doc.ocr_url.trim() !== "") {
     ocrHtmlUrl = getFullUrl(apiBase, doc.ocr_url);
@@ -327,6 +669,44 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
 
   const status = doc.status.toLowerCase();
   const { bg: stBg, fg: stFg, Icon: StatusIcon } = statusMeta(doc.status);
+
+  // ── FIX: Fetch PDF via proxy → convert to blob URL so iframe renders inline ──
+  // Previously the iframe pointed directly at fullFileUrl, which caused the server's
+  // Content-Disposition: attachment header to trigger a browser download instead of
+  // rendering the PDF inline. By fetching through the proxy and creating a same-origin
+  // blob URL, the browser always renders it in the iframe regardless of server headers.
+  useEffect(() => {
+    if (!isPdf || !proxyFileUrl) return;
+
+    let objectUrl: string | null = null;
+
+    setPdfLoading(true);
+    setPdfError(null);
+    setPdfBlobUrl(null);
+
+    fetch(proxyFileUrl, { credentials: "include" })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        // Explicitly set MIME type so the browser treats it as PDF, not a download
+        const pdfBlob = new Blob([blob], { type: "application/pdf" });
+        objectUrl = URL.createObjectURL(pdfBlob);
+        setPdfBlobUrl(objectUrl);
+      })
+      .catch((err: any) => {
+        setPdfError(err.message || "Could not load PDF.");
+      })
+      .finally(() => {
+        setPdfLoading(false);
+      });
+
+    return () => {
+      // Revoke the blob URL on unmount / doc change to free memory
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [isPdf, proxyFileUrl]);
 
   const handleDownloadOCR = async () => {
     if (!ocrHtmlUrl || !downloadProxyUrl) return;
@@ -372,192 +752,254 @@ function DocumentViewer({ doc, apiBase }: { doc: Doc; apiBase: string }) {
   };
 
   return (
-    <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
+    <>
+      {resubmitOpen && (
+        <ResubmitModal
+          doc={doc}
+          apiBase={apiBase}
+          onClose={() => setResubmitOpen(false)}
+        />
+      )}
 
-      {/* LEFT — file preview */}
-      <div
-        style={{
-          flex: 1,
-          overflow: "hidden",
-          borderRight: "1px solid #1e293b",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {isPdf && fullFileUrl && (
-          <iframe
-            src={`${fullFileUrl}#toolbar=0&navpanes=0&scrollbar=1`}
-            title={doc.file_name}
-            style={{ flex: 1, width: "100%", border: "none", display: "block" }}
-          />
-        )}
-        {isImg && imageSrc && (
-          <div style={{ flex: 1, overflow: "auto", padding: 24, display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
-            <img
-              src={imageSrc}
-              alt={doc.file_name}
-              style={{ maxWidth: "100%", borderRadius: 10, boxShadow: "0 4px 32px rgba(0,0,0,0.5)" }}
-            />
-          </div>
-        )}
-        {!isPdf && !isImg && (
-          <Placeholder
-            icon={<FileSearch size={36} style={{ color: "#475569" }} />}
-            title="No preview available"
-            sub="This document type cannot be previewed directly."
-          />
-        )}
-      </div>
+      <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
 
-      {/* RIGHT — OCR output */}
-      <div
-        style={{
-          flex: 1,
-          overflow: "hidden",
-          backgroundColor: "#080e1c",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {/* Header row */}
+        {/* LEFT — file preview */}
         <div
           style={{
+            flex: 1,
+            overflow: "hidden",
+            borderRight: "1px solid #1e293b",
             display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "0 16px",
-            height: 44,
-            borderBottom: "1px solid #1e293b",
-            flexShrink: 0,
+            flexDirection: "column",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div
-              style={{
-                backgroundColor: "rgba(99,102,241,0.12)",
-                width: 28,
-                height: 28,
-                borderRadius: 6,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <FileSearch size={13} style={{ color: "#818cf8" }} />
-            </div>
-            <p
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: "#475569",
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                margin: 0,
-              }}
-            >
-              OCR Output
-            </p>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {status === "completed" && ocrHtmlUrl && (
-              <button
-                id="ocr-download-btn"
-                onClick={handleDownloadOCR}
-                title="Download OCR HTML file"
-                style={{
-                  all: "unset",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  backgroundColor: "rgba(99,102,241,0.12)",
-                  color: "#818cf8",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  padding: "4px 14px",
-                  borderRadius: 9999,
-                  cursor: "pointer",
-                  transition: "background-color 0.15s ease",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(99,102,241,0.22)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(99,102,241,0.12)";
-                }}
-              >
-                <Download size={14} />
-                Download
-              </button>
-            )}
-
-            <span
-              style={{
-                backgroundColor: stBg,
-                color: stFg,
-                fontSize: 10,
-                fontWeight: 700,
-                padding: "3px 9px",
-                borderRadius: 9999,
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-              }}
-            >
-              <StatusIcon size={10} className={status === "processing" ? "animate-spin" : ""} />
-              {doc.status}
-            </span>
-          </div>
-        </div>
-
-        {/* OCR body */}
-        <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-          {status === "queued" && (
-            <Placeholder
-              icon={<Clock size={32} style={{ color: "#fde047" }} />}
-              title="Queued for processing"
-              sub="OCR hasn't started yet. Check back shortly."
-            />
-          )}
-          {status === "processing" && (
+          {/* ── PDF states ── */}
+          {isPdf && pdfLoading && (
             <Placeholder
               icon={<Loader2 size={32} style={{ color: "#93c5fd" }} className="animate-spin" />}
-              title="Processing…"
-              sub="OCR is running. Text will appear here when complete."
+              title="Loading PDF…"
+              sub="Fetching document, please wait."
             />
           )}
-          {status === "completed" && ocrHtmlUrl && (
-            <iframe
-              key={ocrHtmlUrl}
-              src={ocrHtmlUrl}
-              title={`OCR — ${doc.file_name}`}
-              style={{
-                width: "100%",
-                height: "100%",
-                border: "none",
-                display: "block",
-                backgroundColor: "#fff",
-              }}
-              allowFullScreen
-            />
-          )}
-          {status === "completed" && !ocrHtmlUrl && (
-            <Placeholder
-              icon={<FileSearch size={32} style={{ color: "#475569" }} />}
-              title="No OCR output found"
-              sub="The HTML output file could not be located for this document."
-            />
-          )}
-          {status !== "queued" && status !== "processing" && status !== "completed" && (
+          {isPdf && !pdfLoading && pdfError && (
             <Placeholder
               icon={<AlertCircle size={32} style={{ color: "#f87171" }} />}
-              title="Processing failed"
-              sub="OCR could not be completed for this document."
+              title="Could not load PDF"
+              sub={pdfError}
+            />
+          )}
+          {isPdf && !pdfLoading && !pdfError && pdfBlobUrl && (
+            <iframe
+              src={`${pdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=1`}
+              title={doc.file_name}
+              style={{ flex: 1, width: "100%", border: "none", display: "block" }}
+            />
+          )}
+
+          {/* ── Image preview ── */}
+          {isImg && imageSrc && (
+            <div style={{ flex: 1, overflow: "auto", padding: 24, display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
+              <img
+                src={imageSrc}
+                alt={doc.file_name}
+                style={{ maxWidth: "100%", borderRadius: 10, boxShadow: "0 4px 32px rgba(0,0,0,0.5)" }}
+              />
+            </div>
+          )}
+
+          {/* ── No preview fallback ── */}
+          {!isPdf && !isImg && (
+            <Placeholder
+              icon={<FileSearch size={36} style={{ color: "#475569" }} />}
+              title="No preview available"
+              sub="This document type cannot be previewed directly."
             />
           )}
         </div>
+
+        {/* RIGHT — OCR output */}
+        <div
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            backgroundColor: "#080e1c",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {/* Header row */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "0 16px",
+              height: 44,
+              borderBottom: "1px solid #1e293b",
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div
+                style={{
+                  backgroundColor: "rgba(99,102,241,0.12)",
+                  width: 28,
+                  height: 28,
+                  borderRadius: 6,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <FileSearch size={13} style={{ color: "#818cf8" }} />
+              </div>
+              <p
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "#475569",
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  margin: 0,
+                }}
+              >
+                OCR Output
+              </p>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+
+              {/* Download button */}
+              {status === "completed" && ocrHtmlUrl && (
+                <button
+                  id="ocr-download-btn"
+                  onClick={handleDownloadOCR}
+                  title="Download OCR HTML file"
+                  style={{
+                    all: "unset",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    backgroundColor: "rgba(99,102,241,0.12)",
+                    color: "#818cf8",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: "4px 14px",
+                    borderRadius: 9999,
+                    cursor: "pointer",
+                    transition: "background-color 0.15s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(99,102,241,0.22)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(99,102,241,0.12)";
+                  }}
+                >
+                  <Download size={14} />
+                  Download
+                </button>
+              )}
+
+              {/* Resubmit button — Premium only */}
+              {userTier === "Premium" && status === "completed" && (
+                <button
+                  onClick={() => setResubmitOpen(true)}
+                  title="Resubmit for OCR reprocessing"
+                  style={{
+                    all: "unset",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    backgroundColor: "rgba(234,179,8,0.12)",
+                    color: "#fde047",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: "4px 14px",
+                    borderRadius: 9999,
+                    cursor: "pointer",
+                    transition: "background-color 0.15s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(234,179,8,0.22)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(234,179,8,0.12)";
+                  }}
+                >
+                  <RotateCcw size={14} />
+                  Resubmit
+                </button>
+              )}
+
+              <span
+                style={{
+                  backgroundColor: stBg,
+                  color: stFg,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: "3px 9px",
+                  borderRadius: 9999,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                <StatusIcon size={10} className={status === "processing" ? "animate-spin" : ""} />
+                {doc.status}
+              </span>
+            </div>
+          </div>
+
+          {/* OCR body */}
+          <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+            {status === "queued" && (
+              <Placeholder
+                icon={<Clock size={32} style={{ color: "#fde047" }} />}
+                title="Queued for processing"
+                sub="OCR hasn't started yet. Check back shortly."
+              />
+            )}
+            {status === "processing" && (
+              <Placeholder
+                icon={<Loader2 size={32} style={{ color: "#93c5fd" }} className="animate-spin" />}
+                title="Processing…"
+                sub="OCR is running. Text will appear here when complete."
+              />
+            )}
+            {status === "completed" && ocrHtmlUrl && (
+              <iframe
+                key={ocrHtmlUrl}
+                src={ocrHtmlUrl}
+                title={`OCR — ${doc.file_name}`}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  border: "none",
+                  display: "block",
+                  backgroundColor: "#fff",
+                }}
+                allowFullScreen
+              />
+            )}
+            {status === "completed" && !ocrHtmlUrl && (
+              <Placeholder
+                icon={<FileSearch size={32} style={{ color: "#475569" }} />}
+                title="No OCR output found"
+                sub="The HTML output file could not be located for this document."
+              />
+            )}
+            {status !== "queued" && status !== "processing" && status !== "completed" && (
+              <Placeholder
+                icon={<AlertCircle size={32} style={{ color: "#f87171" }} />}
+                title="Processing failed"
+                sub="OCR could not be completed for this document."
+              />
+            )}
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -573,11 +1015,10 @@ export default function CollectionDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Doc | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [user, setUser] = useState<{ name?: string; email: string; photo?: string } | null>(null);
+  const [user, setUser] = useState<{ name?: string; email: string; photo?: string; tier?: string } | null>(null);
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-  // Fetch current logged-in user
   useEffect(() => {
     fetch(`${API_BASE}/auth/me`, { credentials: "include" })
       .then((res) => {
@@ -588,7 +1029,6 @@ export default function CollectionDetailPage() {
       .catch(() => router.push("/printed"));
   }, [API_BASE]);
 
-  // Logout handler
   const onLogout = async () => {
     await fetch(`${API_BASE}/auth/logout`, {
       method: "POST",
@@ -597,7 +1037,6 @@ export default function CollectionDetailPage() {
     router.push("/printed");
   };
 
-  // Fetch documents
   useEffect(() => {
     if (!id) return;
     setError(null);
@@ -628,7 +1067,6 @@ export default function CollectionDetailPage() {
 
   return (
     <>
-      {/* global styles */}
       <style>{`
         *, *::before, *::after { box-sizing: border-box; }
         body { margin: 0; }
@@ -640,11 +1078,21 @@ export default function CollectionDetailPage() {
           0% { background-position: -500px 0; }
           100% { background-position: 500px 0; }
         }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(12px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
         .sk {
           background: linear-gradient(90deg,#1e293b 25%,#263347 50%,#1e293b 75%);
           background-size: 500px 100%;
           animation: shimmer 1.6s infinite linear;
         }
+        textarea::placeholder { color: #334155; }
+        textarea:focus { outline: none; }
       `}</style>
 
       <Header user={user} onLogout={onLogout} />
@@ -795,7 +1243,12 @@ export default function CollectionDetailPage() {
 
           <div style={{ flex: 1, overflow: "hidden" }}>
             {selected ? (
-              <DocumentViewer key={selected.document_id} doc={selected} apiBase={API_BASE} />
+              <DocumentViewer
+                key={selected.document_id}
+                doc={selected}
+                apiBase={API_BASE}
+                userTier={user?.tier}
+              />
             ) : (
               <Placeholder
                 icon={<FileSearch size={44} strokeWidth={1.2} style={{ color: "#1e293b" }} />}
