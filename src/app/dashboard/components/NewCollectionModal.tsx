@@ -18,7 +18,8 @@ type UploadStatus = "idle" | "uploading" | "success" | "error";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_DESC_LENGTH = 150;
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+/*const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";*/
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://10-4-16-36.nip.io:8003";
 
 // Dynamically import JSZip only when needed
 async function extractZip(zipFile: File): Promise<File[]> {
