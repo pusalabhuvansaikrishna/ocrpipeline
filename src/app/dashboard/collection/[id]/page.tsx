@@ -1018,7 +1018,7 @@ export default function CollectionDetailPage() {
   const [user, setUser] = useState<{ name?: string; email: string; photo?: string; tier?: string } | null>(null);
 
   /*const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";*/
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://10.4.16.36:8003";
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://10-4-16-36.nip.io:8003";
 
   useEffect(() => {
     fetch(`${API_BASE}/auth/me`, { credentials: "include" })

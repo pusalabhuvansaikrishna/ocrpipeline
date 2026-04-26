@@ -134,7 +134,7 @@ export default function DashboardPage() {
 
   const router = useRouter();
   /*const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";*/
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://10.4.16.36:8003";
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://10-4-16-36.nip.io:8003";
 
   useEffect(() => {
     const controller = new AbortController();
