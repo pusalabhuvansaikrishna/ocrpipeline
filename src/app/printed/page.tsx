@@ -103,7 +103,8 @@ export default function PrintedOCR() {
     visible: boolean;
   } | null>(null);
 
-  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  /*const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";*/
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://10.4.16.36:8003";
   const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
   const ALLOWED_TYPES = [
