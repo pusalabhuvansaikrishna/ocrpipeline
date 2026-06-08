@@ -20,17 +20,7 @@ export default function Header() {
 
         {/* Navigation / CTA */}
         <nav className="flex items-center gap-6">
-
-          <Link
-            href="/printed"
-            className="
-              ml-4 px-6 py-2 rounded-lg font-semibold text-sm
-              bg-orange-600 text-white border border-orange-500
-              hover:bg-orange-700 hover:border-orange-400
-              transition-all duration-300
-              active:scale-95
-            "
-          >
+          <Link href="/printed" className="ml-4 px-6 py-2 rounded-lg font-semibold text-sm bg-orange-600 text-white border border-orange-500 hover:bg-orange-700 hover:border-orange-400 transition-all duration-300 active:scale-95">
             Try Now
           </Link>
         </nav>

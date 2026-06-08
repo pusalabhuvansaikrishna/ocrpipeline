@@ -2,11 +2,11 @@
 "use client";
 
 import Link from "next/link";
+import { BASE_URL } from "@/config/api";
 
 export default function PrintedHeader() {
   const handleGoogleLogin = () => {
-    /*const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";*/
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://10-4-16-36.nip.io:8003";
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || BASE_URL;
     window.location.href = `${API_BASE}/auth/google/login`;
   };
 
@@ -22,18 +22,10 @@ export default function PrintedHeader() {
           />
         </Link>
 
-        {/* Continue with Google Button - Orange Hover + Lift Effect */}
+        {/* Continue with Google Button */}
         <button
           onClick={handleGoogleLogin}
-          className="
-            flex items-center gap-3
-            px-6 py-2.5 rounded-xl font-semibold text-sm
-            bg-gray-800 border border-gray-700 text-gray-200
-            transition-all duration-300
-            hover:bg-orange-600 hover:border-orange-500 hover:text-white
-            hover:-translate-y-0.5 hover:shadow-xl hover:shadow-orange-500/30
-            active:scale-95 active:shadow-lg
-          "
+          className="flex items-center gap-3 px-6 py-2.5 rounded-xl font-semibold text-sm bg-gray-800 border border-gray-700 text-gray-200 transition-all duration-300 hover:bg-orange-600 hover:border-orange-500 hover:text-white hover:-translate-y-0.5 hover:shadow-xl hover:shadow-orange-500/30 active:scale-95 active:shadow-lg"
         >
           <img
             src="https://www.google.com/favicon.ico"

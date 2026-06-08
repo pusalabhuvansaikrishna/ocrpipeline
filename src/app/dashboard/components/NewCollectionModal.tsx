@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Upload, X, FileText, Image as ImageIcon, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { BASE_URL } from "@/config/api";
 
 type Props = {
   isOpen: boolean;
@@ -15,29 +16,25 @@ type Props = {
 };
 
 type UploadStatus = "idle" | "uploading" | "success" | "error";
+type NameCheckStatus = "idle" | "checking" | "available" | "taken";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_DESC_LENGTH = 150;
-/*const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";*/
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://10-4-16-36.nip.io:8003";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? BASE_URL;
 
-// Dynamically import JSZip only when needed
 async function extractZip(zipFile: File): Promise<File[]> {
-  // @ts-ignore – jszip is a peer dep; add "jszip" to your package.json
   const JSZip = (await import("jszip")).default;
   const zip = await JSZip.loadAsync(zipFile);
   const extracted: File[] = [];
 
   await Promise.all(
     Object.entries(zip.files).map(async ([relativePath, zipEntry]) => {
-      // Skip directories and macOS metadata files
       if (zipEntry.dir) return;
       if (relativePath.startsWith("__MACOSX/") || relativePath.includes("/.")) return;
 
       const blob = await zipEntry.async("blob");
       const fileName = relativePath.split("/").pop() ?? relativePath;
 
-      // Infer MIME type from extension
       const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
       const mimeMap: Record<string, string> = {
         png: "image/png",
@@ -63,11 +60,7 @@ async function extractZip(zipFile: File): Promise<File[]> {
   return extracted;
 }
 
-export default function NewCollectionModal({
-  isOpen,
-  onClose,
-  onProcess,
-}: Props) {
+export default function NewCollectionModal({ isOpen, onClose, onProcess }: Props) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [language, setLanguage] = useState("");
@@ -81,6 +74,9 @@ export default function NewCollectionModal({
   const [uploadMessage, setUploadMessage] = useState<string>("");
   const [uploadedBlobs, setUploadedBlobs] = useState<string[]>([]);
   const [failedFiles, setFailedFiles] = useState<{ filename: string; error: string }[]>([]);
+
+  const [nameCheckStatus, setNameCheckStatus] = useState<NameCheckStatus>("idle");
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -106,18 +102,85 @@ export default function NewCollectionModal({
       setUploadedBlobs([]);
       setFailedFiles([]);
       setExtracting(false);
+      setNameCheckStatus("idle");
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  // ── ALL hooks must be declared before any early return ────────────────────
 
-  // ─── Process a raw FileList/array: extract ZIPs, filter oversized files ───
+  const checkCollectionName = useCallback(async (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setNameCheckStatus("idle");
+      return;
+    }
+
+    setNameCheckStatus("checking");
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/collection/check-name?name=${encodeURIComponent(trimmed)}`,
+        { credentials: "include" }
+      );
+      if (!res.ok) {
+        setNameCheckStatus("idle");
+        return;
+      }
+      const data = await res.json();
+      setNameCheckStatus(data.available ? "available" : "taken");
+
+      if (!data.available) {
+        setErrors((prev) => ({ ...prev, name: `"${trimmed}" is already taken.` }));
+      } else {
+        setErrors((prev) => ({ ...prev, name: undefined }));
+      }
+    } catch {
+      setNameCheckStatus("idle");
+    }
+  }, []);
+
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setName(value);
+    setErrors((prev) => ({ ...prev, name: undefined }));
+    setNameCheckStatus("idle");
+
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+
+    if (value.trim()) {
+      debounceTimer.current = setTimeout(() => {
+        checkCollectionName(value);
+      }, 400);
+    }
+  };
+
+  const renderNameIndicator = () => {
+    if (nameCheckStatus === "checking") {
+      return (
+        <Loader2
+          size={14}
+          style={{ color: "#9ca3af", animation: "spin 1s linear infinite" }}
+        />
+      );
+    }
+    if (nameCheckStatus === "available") {
+      return <CheckCircle2 size={14} style={{ color: "#4ade80" }} />;
+    }
+    if (nameCheckStatus === "taken") {
+      return <AlertCircle size={14} style={{ color: "#f87171" }} />;
+    }
+    return null;
+  };
+
   const processIncomingFiles = async (incoming: FileList | File[]) => {
     setExtracting(true);
     const result: File[] = [];
 
     for (const file of Array.from(incoming)) {
-      if (file.name.toLowerCase().endsWith(".zip") || file.type === "application/zip" || file.type === "application/x-zip-compressed") {
+      if (
+        file.name.toLowerCase().endsWith(".zip") ||
+        file.type === "application/zip" ||
+        file.type === "application/x-zip-compressed"
+      ) {
         try {
           const extracted = await extractZip(file);
           result.push(...extracted);
@@ -141,7 +204,6 @@ export default function NewCollectionModal({
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       processIncomingFiles(e.target.files);
-      // Reset input so the same file can be re-selected
       e.target.value = "";
     }
   };
@@ -171,6 +233,8 @@ export default function NewCollectionModal({
 
     const newErrors: { name?: string; language?: string } = {};
     if (!name.trim()) newErrors.name = "Collection name is required.";
+    if (nameCheckStatus === "taken") newErrors.name = `"${name.trim()}" is already taken.`;
+    if (nameCheckStatus === "checking") newErrors.name = "Please wait while we check the name.";
     if (!language) newErrors.language = "Please select a language.";
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -203,8 +267,9 @@ export default function NewCollectionModal({
         const message =
           typeof detail === "string"
             ? detail
-            : detail?.failed?.map((f: { filename: string; error: string }) => f.filename).join(", ") ??
-              "Upload failed. Please try again.";
+            : detail?.failed
+                ?.map((f: { filename: string; error: string }) => f.filename)
+                .join(", ") ?? "Upload failed. Please try again.";
         setUploadStatus("error");
         setUploadMessage(message);
         return;
@@ -231,6 +296,9 @@ export default function NewCollectionModal({
       setUploadMessage("Network error – could not reach the server.");
     }
   };
+
+  // ── Early return AFTER all hooks ──────────────────────────────────────────
+  if (!isOpen) return null;
 
   const descRemaining = MAX_DESC_LENGTH - description.length;
   const isUploading = uploadStatus === "uploading";
@@ -337,7 +405,6 @@ export default function NewCollectionModal({
                 Upload Here
               </p>
 
-              {/* Drop zone */}
               <div
                 onDrop={handleDrop}
                 onDragOver={(e) => e.preventDefault()}
@@ -357,11 +424,7 @@ export default function NewCollectionModal({
                   <>
                     <Loader2
                       size={40}
-                      style={{
-                        color: "#fb923c",
-                        marginBottom: "16px",
-                        animation: "spin 1s linear infinite",
-                      }}
+                      style={{ color: "#fb923c", marginBottom: "16px", animation: "spin 1s linear infinite" }}
                     />
                     <p style={{ margin: 0, fontSize: "0.875rem", color: "#e5e7eb" }}>
                       Extracting ZIP…
@@ -373,7 +436,6 @@ export default function NewCollectionModal({
                     <p style={{ margin: "0 0 16px", fontSize: "0.875rem", color: "#e5e7eb" }}>
                       Drag &amp; drop files here
                     </p>
-
                     <button
                       type="button"
                       onClick={handleSelectClick}
@@ -391,21 +453,12 @@ export default function NewCollectionModal({
                         boxShadow: btnPopped
                           ? "0 0 0 4px rgba(234,88,12,0.35)"
                           : "0 2px 8px rgba(0,0,0,0.3)",
-                        transition:
-                          "transform 0.15s cubic-bezier(.36,.07,.19,.97), box-shadow 0.15s ease",
+                        transition: "transform 0.15s cubic-bezier(.36,.07,.19,.97), box-shadow 0.15s ease",
                       }}
                     >
                       Select Files / ZIP
                     </button>
-
-                    <p
-                      style={{
-                        margin: "16px 0 0",
-                        fontSize: "11px",
-                        color: "#6b7280",
-                        lineHeight: 1.5,
-                      }}
-                    >
+                    <p style={{ margin: "16px 0 0", fontSize: "11px", color: "#6b7280", lineHeight: 1.5 }}>
                       JPG, PNG, PDF, ZIP • max 10 MB
                       <br />
                       <span style={{ color: "#4b5563" }}>ZIPs are extracted automatically</span>
@@ -423,7 +476,6 @@ export default function NewCollectionModal({
                 />
               </div>
 
-              {/* File list */}
               {files.length > 0 && (
                 <div
                   style={{
@@ -435,14 +487,7 @@ export default function NewCollectionModal({
                     overflow: "hidden",
                   }}
                 >
-                  <p
-                    style={{
-                      flexShrink: 0,
-                      margin: "0 0 6px",
-                      fontSize: "12px",
-                      color: "#9ca3af",
-                    }}
-                  >
+                  <p style={{ flexShrink: 0, margin: "0 0 6px", fontSize: "12px", color: "#9ca3af" }}>
                     {files.length} file{files.length !== 1 ? "s" : ""} selected
                   </p>
 
@@ -501,13 +546,8 @@ export default function NewCollectionModal({
                           >
                             {file.name}
                           </span>
-
-                          {wasUploaded && (
-                            <CheckCircle2 size={12} style={{ color: "#4ade80", flexShrink: 0 }} />
-                          )}
-                          {hasFailed && (
-                            <AlertCircle size={12} style={{ color: "#f87171", flexShrink: 0 }} />
-                          )}
+                          {wasUploaded && <CheckCircle2 size={12} style={{ color: "#4ade80", flexShrink: 0 }} />}
+                          {hasFailed && <AlertCircle size={12} style={{ color: "#f87171", flexShrink: 0 }} />}
                           {!wasUploaded && !hasFailed && (
                             <button
                               onClick={() => removeFile(i)}
@@ -558,28 +598,56 @@ export default function NewCollectionModal({
                 >
                   Collection Name <span style={{ color: "#f97316" }}>*</span>
                 </label>
-                <input
-                  value={name}
-                  disabled={isBusy}
-                  onChange={(e) => {
-                    setName(e.target.value);
-                    if (e.target.value.trim())
-                      setErrors((prev) => ({ ...prev, name: undefined }));
-                  }}
-                  style={{
-                    width: "100%",
-                    backgroundColor: "#1f2937",
-                    border: `1px solid ${errors.name ? "#ef4444" : "#374151"}`,
-                    borderRadius: "0.75rem",
-                    padding: "8px 24px",
-                    color: "#f3f4f6",
-                    fontSize: "0.875rem",
-                    outline: "none",
-                    opacity: isBusy ? 0.5 : 1,
-                    boxSizing: "border-box",
-                  }}
-                />
-                {errors.name && (
+
+                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                  <input
+                    value={name}
+                    disabled={isBusy}
+                    onChange={handleNameChange}
+                    style={{
+                      width: "100%",
+                      backgroundColor: "#1f2937",
+                      border: `1px solid ${
+                        errors.name
+                          ? "#ef4444"
+                          : nameCheckStatus === "available"
+                          ? "#15803d"
+                          : nameCheckStatus === "taken"
+                          ? "#b91c1c"
+                          : "#374151"
+                      }`,
+                      borderRadius: "0.75rem",
+                      padding: "8px 36px 8px 24px",
+                      color: "#f3f4f6",
+                      fontSize: "0.875rem",
+                      outline: "none",
+                      opacity: isBusy ? 0.5 : 1,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      right: "12px",
+                      display: "flex",
+                      alignItems: "center",
+                    }}
+                  >
+                    {renderNameIndicator()}
+                  </div>
+                </div>
+
+                {nameCheckStatus === "available" && !errors.name && (
+                  <p style={{ color: "#4ade80", fontSize: "12px", marginTop: "6px" }}>
+                    ✓ Name is available
+                  </p>
+                )}
+                {nameCheckStatus === "taken" && (
+                  <p style={{ color: "#f87171", fontSize: "12px", marginTop: "6px" }}>
+                    ✗ You already have a collection with this name
+                  </p>
+                )}
+                {errors.name && nameCheckStatus !== "taken" && (
                   <p style={{ color: "#f87171", fontSize: "12px", marginTop: "6px" }}>
                     {errors.name}
                   </p>
@@ -646,8 +714,7 @@ export default function NewCollectionModal({
                   disabled={isBusy}
                   onChange={(e) => {
                     setLanguage(e.target.value);
-                    if (e.target.value)
-                      setErrors((prev) => ({ ...prev, language: undefined }));
+                    if (e.target.value) setErrors((prev) => ({ ...prev, language: undefined }));
                   }}
                   style={{
                     width: "100%",
@@ -662,9 +729,7 @@ export default function NewCollectionModal({
                     boxSizing: "border-box",
                   }}
                 >
-                  <option value="" disabled>
-                    Select a language...
-                  </option>
+                  <option value="" disabled>Select a language...</option>
                   {languageOptions.length === 0 ? (
                     <option disabled>Loading languages...</option>
                   ) : (
@@ -714,17 +779,10 @@ export default function NewCollectionModal({
                   }}
                 >
                   {uploadStatus === "uploading" && (
-                    <Loader2
-                      size={16}
-                      style={{ animation: "spin 1s linear infinite", flexShrink: 0 }}
-                    />
+                    <Loader2 size={16} style={{ animation: "spin 1s linear infinite", flexShrink: 0 }} />
                   )}
-                  {uploadStatus === "success" && (
-                    <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
-                  )}
-                  {uploadStatus === "error" && (
-                    <AlertCircle size={16} style={{ flexShrink: 0 }} />
-                  )}
+                  {uploadStatus === "success" && <CheckCircle2 size={16} style={{ flexShrink: 0 }} />}
+                  {uploadStatus === "error" && <AlertCircle size={16} style={{ flexShrink: 0 }} />}
                   <span>{uploadMessage}</span>
                 </div>
               )}
@@ -732,7 +790,7 @@ export default function NewCollectionModal({
               {/* Submit */}
               <button
                 type="submit"
-                disabled={isBusy || uploadStatus === "success"}
+                disabled={isBusy || uploadStatus === "success" || nameCheckStatus === "taken" || nameCheckStatus === "checking"}
                 style={{
                   marginTop: "auto",
                   padding: "12px 24px",
@@ -743,8 +801,13 @@ export default function NewCollectionModal({
                   fontWeight: 600,
                   fontSize: "0.875rem",
                   cursor:
-                    isBusy || uploadStatus === "success" ? "not-allowed" : "pointer",
-                  opacity: isBusy || uploadStatus === "success" ? 0.6 : 1,
+                    isBusy || uploadStatus === "success" || nameCheckStatus === "taken" || nameCheckStatus === "checking"
+                      ? "not-allowed"
+                      : "pointer",
+                  opacity:
+                    isBusy || uploadStatus === "success" || nameCheckStatus === "taken" || nameCheckStatus === "checking"
+                      ? 0.6
+                      : 1,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
