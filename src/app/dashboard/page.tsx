@@ -1314,7 +1314,6 @@ export default function DashboardPage() {
     <main className="min-h-screen flex flex-col bg-gray-950 text-gray-100">
       <DashboardHeader
         user={user}
-        tier={user.tier}
         onLogout={handleLogout}
         onCreateCollection={() => setIsModalOpen(true)}
         onUpgrade={() => setIsUpgradeModalOpen(true)}
