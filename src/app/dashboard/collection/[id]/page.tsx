@@ -929,8 +929,13 @@ function OcrOverlay({
    zoom. Multiplicative zoom is what caused a small scroll to rocket
    straight to 400% — this keeps every tick feeling the same size
    regardless of how zoomed in you already are.
+
+   NOTE: targetRef is typed as React.RefObject<HTMLElement | null>
+   because useRef<HTMLDivElement>(null) produces a RefObject whose
+   `.current` can be null — TypeScript (Next.js 16 / React 19 types)
+   will not allow narrowing that to RefObject<HTMLElement> implicitly.
 ═══════════════════════════════════════════════════════════════ */
-function useCtrlWheelZoom(targetRef: React.RefObject<HTMLElement>) {
+function useCtrlWheelZoom(targetRef: React.RefObject<HTMLElement | null>) {
   const [zoom, setZoom] = useState(1);
   const zoomRef = useRef(1);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
@@ -965,8 +970,11 @@ function useCtrlWheelZoom(targetRef: React.RefObject<HTMLElement>) {
    container by directly updating scrollLeft/scrollTop. A plain
    click (mousedown+mouseup with no real movement) exits hand mode
    and returns to the normal cursor/selection behavior.
+
+   NOTE: targetRef is typed as React.RefObject<HTMLElement | null>
+   for the same reason as useCtrlWheelZoom above.
 ═══════════════════════════════════════════════════════════════ */
-function useHandTool(targetRef: React.RefObject<HTMLElement>) {
+function useHandTool(targetRef: React.RefObject<HTMLElement | null>) {
   const [handMode, setHandMode] = useState(false);
   const [dragging, setDragging] = useState(false);
   const draggingRef = useRef(false);
