@@ -1528,7 +1528,7 @@ function DocumentViewer({
   useEffect(() => {
     if (!isPdf || !fileUrl) return;
     setPdfError(null);
-    setPdfBlobUrl(fileUrl);
+    setPdfBlobUrl(`/api/pdf-proxy?url=${encodeURIComponent(fileUrl)}`);
   }, [isPdf, fileUrl]);
 
   useEffect(() => {
