@@ -18,7 +18,8 @@ type Props = {
 type UploadStatus = "idle" | "uploading" | "success" | "error";
 type NameCheckStatus = "idle" | "checking" | "available" | "taken";
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_FILE_SIZE = 150 * 1024 * 1024; // 150 MB
+const MAX_FILE_SIZE_LABEL = "150 MB";
 const MAX_DESC_LENGTH = 150;
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? BASE_URL;
 
@@ -52,7 +53,7 @@ async function extractZip(zipFile: File): Promise<File[]> {
       if (file.size <= MAX_FILE_SIZE) {
         extracted.push(file);
       } else {
-        alert(`⚠️ ${fileName} (inside ZIP) is larger than 10 MB and was skipped.`);
+        alert(`⚠️ ${fileName} (inside ZIP) is larger than ${MAX_FILE_SIZE_LABEL} and was skipped.`);
       }
     })
   );
@@ -190,7 +191,7 @@ export default function NewCollectionModal({ isOpen, onClose, onProcess }: Props
         }
       } else {
         if (file.size > MAX_FILE_SIZE) {
-          alert(`⚠️ ${file.name} is larger than 10 MB and was skipped.`);
+          alert(`⚠️ ${file.name} is larger than ${MAX_FILE_SIZE_LABEL} and was skipped.`);
         } else {
           result.push(file);
         }
@@ -459,7 +460,7 @@ export default function NewCollectionModal({ isOpen, onClose, onProcess }: Props
                       Select Files / ZIP
                     </button>
                     <p style={{ margin: "16px 0 0", fontSize: "11px", color: "#6b7280", lineHeight: 1.5 }}>
-                      JPG, PNG, PDF, ZIP • max 10 MB
+                      JPG, PNG, PDF, ZIP • max {MAX_FILE_SIZE_LABEL}
                       <br />
                       <span style={{ color: "#4b5563" }}>ZIPs are extracted automatically</span>
                     </p>

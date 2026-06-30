@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeftOpen, FileSearch, FileSpreadsheet,
   FileType, Download, RotateCcw, X, Copy, Check, ChevronLeft,
   ChevronRight as ChevronRightIcon, Bell, FileJson, Trash2,
-  Plus, Search,
+  Plus, Search, ZoomIn, ZoomOut, Hand,
 } from "lucide-react";
 import Header from "../../components/Header";
 import { BASE_URL } from "@/config/api";
@@ -46,6 +46,22 @@ const IMAGE_EXTS = new Set(["jpg","jpeg","png","gif","webp","bmp","tiff","svg","
 const PDF_EXTS   = new Set(["pdf"]);
 const REASON_MAX = 1000;
 
+// ── Resubmitted badge — neon/electric blue (previous blue-500 blended into the dark UI) ──
+const RESUBMIT_BLUE        = "#00c2ff";   // electric / neon cyan-blue
+const RESUBMIT_BLUE_BG     = "rgba(0,194,255,0.16)";
+const RESUBMIT_BLUE_BORDER = "rgba(0,194,255,0.55)";
+
+// ── Zoom (Ctrl + scroll) constants — shared by the image and PDF viewers ──
+// Linear zoom: each wheel "tick" nudges the zoom level by a small, constant
+// amount rather than multiplying the current zoom (which used to cause huge
+// jumps — a small scroll could rocket straight to 400%). Now the zoom level
+// changes by the same fixed step regardless of current zoom, so it feels
+// smooth and predictable at any zoom level.
+const ZOOM_MIN         = 0.5;
+const ZOOM_MAX         = 4;
+const LINEAR_ZOOM_STEP = 0.0012; // zoom-level change per wheel-delta unit (linear, not multiplicative)
+const ZOOM_BUTTON_STEP = 0.2;    // zoom-level change per +/- button click
+
 /* ─────────────── HELPERS ────────────── */
 function ext(doc: Doc) { return (doc.file_type ?? "").toLowerCase().trim(); }
 function fmtSize(bytes: number) {
@@ -71,6 +87,65 @@ function buildUrl(base: string, path: string) {
 function px(url: string) {
   return url ? `/api/image-proxy?url=${encodeURIComponent(url)}` : "";
 }
+function clampZoom(z: number) { return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)); }
+
+/* ─────────────── ZOOM HUD ─────────────── */
+// Small floating control shown bottom-right of a viewer, displays current
+// zoom % and offers +/- and reset buttons. Purely visual — actual zoom
+// state lives in the parent renderer.
+const ZoomHud = React.memo(function ZoomHud({
+  zoom, onZoomIn, onZoomOut, onReset,
+}: { zoom: number; onZoomIn: () => void; onZoomOut: () => void; onReset: () => void }) {
+  const pct = Math.round(zoom * 100);
+  const btnStyle: React.CSSProperties = {
+    all:"unset", display:"flex", alignItems:"center", justifyContent:"center",
+    width:24, height:24, borderRadius:6, cursor:"pointer", color:"#94a3b8",
+    transition:"all 0.12s",
+  };
+  return (
+    <div style={{
+      position:"sticky", bottom:14, alignSelf:"flex-end", marginRight:14, marginTop:-40,
+      zIndex:20, display:"flex", alignItems:"center", gap:2,
+      backgroundColor:"rgba(13,22,38,0.92)", border:"1px solid #1e293b", borderRadius:9999,
+      padding:"4px 6px", boxShadow:"0 8px 24px rgba(0,0,0,0.5)", backdropFilter:"blur(10px)",
+    }}>
+      <button onClick={onZoomOut} title="Zoom out" style={btnStyle}
+        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(99,102,241,0.15)"; (e.currentTarget as HTMLElement).style.color = "#818cf8"; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; (e.currentTarget as HTMLElement).style.color = "#94a3b8"; }}
+      ><ZoomOut size={13}/></button>
+      <button onClick={onReset} title="Reset zoom" style={{
+        all:"unset", fontSize:11, fontWeight:700, color:"#94a3b8", padding:"0 6px",
+        cursor:"pointer", minWidth:38, textAlign:"center" }}
+        onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = "#e2e8f0"}
+        onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = "#94a3b8"}
+      >{pct}%</button>
+      <button onClick={onZoomIn} title="Zoom in" style={btnStyle}
+        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(99,102,241,0.15)"; (e.currentTarget as HTMLElement).style.color = "#818cf8"; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; (e.currentTarget as HTMLElement).style.color = "#94a3b8"; }}
+      ><ZoomIn size={13}/></button>
+    </div>
+  );
+});
+
+/* ─────────────── HAND TOOL HUD ─────────────── */
+// Tiny pill indicator shown when hand/pan mode is active, so the user knows
+// why their cursor turned into a hand and how to get back to normal.
+const HandModeHud = React.memo(function HandModeHud() {
+  return (
+    <div style={{
+      position:"absolute", top:14, left:14, zIndex:20,
+      display:"flex", alignItems:"center", gap:6,
+      backgroundColor:"rgba(13,22,38,0.92)", border:"1px solid rgba(99,102,241,0.35)",
+      borderRadius:9999, padding:"6px 12px", boxShadow:"0 8px 24px rgba(0,0,0,0.5)",
+      backdropFilter:"blur(10px)", pointerEvents:"none",
+    }}>
+      <Hand size={12} style={{ color:"#818cf8" }}/>
+      <span style={{ fontSize:11, fontWeight:600, color:"#a5b4fc" }}>
+        Hand tool — drag to pan, click to exit
+      </span>
+    </div>
+  );
+});
 
 /* ─────────────── TOAST SYSTEM ─────────── */
 let toastIdCounter = 0;
@@ -356,9 +431,67 @@ const ResubmitModal = React.memo(function ResubmitModal({
   );
 });
 
+/* ─────────────── RESUBMITTED — circular icon badge with hover tooltip ─────────────── */
+const ResubmittedBadge = React.memo(function ResubmittedBadge({
+  size = 20, iconSize = 11,
+}: { size?: number; iconSize?: number }) {
+  const [hovered, setHovered]   = useState(false);
+  const [coords, setCoords]     = useState<{ x: number; y: number } | null>(null);
+  const iconRef = useRef<HTMLDivElement>(null);
+
+  const handleEnter = useCallback(() => {
+    const r = iconRef.current?.getBoundingClientRect();
+    if (r) setCoords({ x: r.left + r.width / 2, y: r.top });
+    setHovered(true);
+  }, []);
+  const handleLeave = useCallback(() => setHovered(false), []);
+
+  return (
+    <>
+      <div
+        ref={iconRef}
+        role="img"
+        aria-label="Resubmitted for OCR"
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+        style={{
+          width:size, height:size, borderRadius:"50%",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          backgroundColor: RESUBMIT_BLUE_BG,
+          border:`1px solid ${RESUBMIT_BLUE_BORDER}`,
+          flexShrink:0, cursor:"default",
+          animation:"resubmittedIn 0.25s cubic-bezier(0.34,1.56,0.64,1)",
+        }}
+      >
+        <RotateCcw size={iconSize} style={{ color:RESUBMIT_BLUE }}/>
+      </div>
+
+      {hovered && coords && (
+        <div style={{
+          position:"fixed", left:coords.x, top:coords.y - 10,
+          transform:"translate(-50%, -100%)", zIndex:9999, pointerEvents:"none",
+          backgroundColor:"#0d1626", border:`1px solid ${RESUBMIT_BLUE_BORDER}`, borderRadius:8,
+          padding:"7px 11px", whiteSpace:"nowrap",
+          boxShadow:"0 8px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04)",
+          animation:"slideUp 0.12s ease",
+        }}>
+          <span style={{ fontSize:11, fontWeight:600, color:"#e2e8f0" }}>
+            Submitted for reprocessing, update will be available soon.
+          </span>
+          <div style={{
+            position:"absolute", top:"100%", left:"50%", transform:"translateX(-50%)",
+            width:0, height:0, borderLeft:"5px solid transparent", borderRight:"5px solid transparent",
+            borderTop:`5px solid ${RESUBMIT_BLUE_BORDER}`,
+          }}/>
+        </div>
+      )}
+    </>
+  );
+});
+
 /* ─────────────── SIDEBAR FILE TILE ─── */
-const FileTile = React.memo(function FileTile({ doc, isActive, onClick, apiBase }: {
-  doc: Doc; isActive: boolean; onClick: () => void; apiBase: string;
+const FileTile = React.memo(function FileTile({ doc, isActive, onClick, apiBase, isResubmitted }: {
+  doc: Doc; isActive: boolean; onClick: () => void; apiBase: string; isResubmitted?: boolean;
 }) {
   const [imgErr, setImgErr] = useState(false);
   const e     = ext(doc);
@@ -389,7 +522,7 @@ const FileTile = React.memo(function FileTile({ doc, isActive, onClick, apiBase 
       onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.borderColor = "rgba(99,102,241,0.35)"; }}
       onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.borderColor = "#1e293b"; }}
     >
-      {/* Thumbnail — no status dot overlay anymore */}
+      {/* Thumbnail */}
       <div style={{ position:"relative", width:"100%", height:100, overflow:"hidden", flexShrink:0,
         backgroundColor: isImg ? "#000" : theme.bg, display:"flex", alignItems:"center", justifyContent:"center" }}>
         {isImg && !imgErr && thumbSrc
@@ -416,23 +549,32 @@ const FileTile = React.memo(function FileTile({ doc, isActive, onClick, apiBase 
           {e ? e.toUpperCase() : "—"}{fmtSize(doc.file_size) ? ` · ${fmtSize(doc.file_size)}` : ""}
         </p>
 
-        {/* Status badge — moved to footer, full-width bar style */}
-        <div style={{
-          display:"flex", alignItems:"center", gap:5,
-          backgroundColor: stBg,
-          borderRadius:6,
-          padding:"4px 8px",
-          border:`1px solid ${stFg}33`,
-        }}>
-          <StatusIcon
-            size={11}
-            style={{ color:stFg, flexShrink:0 }}
-            className={doc.status.toLowerCase() === "processing" ? "animate-spin" : ""}
-          />
-          <span style={{ fontSize:11, fontWeight:700, color:stFg, letterSpacing:"0.03em" }}>
-            {doc.status.charAt(0).toUpperCase() + doc.status.slice(1).toLowerCase()}
-          </span>
-          {doc.version_count > 0 && (
+        {/* Status row: status pill + (resubmitted badge OR recomputed tag) sit side by side, as separate elements */}
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{
+            display:"flex", alignItems:"center", gap:5,
+            backgroundColor: stBg,
+            borderRadius:6,
+            padding:"4px 8px",
+            border:`1px solid ${stFg}33`,
+          }}>
+            <StatusIcon
+              size={11}
+              style={{ color:stFg, flexShrink:0 }}
+              className={doc.status.toLowerCase() === "processing" ? "animate-spin" : ""}
+            />
+            <span style={{ fontSize:11, fontWeight:700, color:stFg, letterSpacing:"0.03em" }}>
+              {doc.status.charAt(0).toUpperCase() + doc.status.slice(1).toLowerCase()}
+            </span>
+          </div>
+
+          {/* ── Resubmitted circular icon badge — sits OUTSIDE the status pill, to its right ── */}
+          {isResubmitted && (
+            <div style={{ marginLeft:"auto" }}>
+              <ResubmittedBadge size={20} iconSize={11}/>
+            </div>
+          )}
+          {!isResubmitted && doc.version_count > 0 && (
             <span style={{
               marginLeft:"auto", display:"inline-flex", alignItems:"center", gap:3,
               backgroundColor:"rgba(168,85,247,0.18)", color:"#c084fc",
@@ -479,9 +621,9 @@ function Placeholder({ icon, title, sub }: { icon:React.ReactNode; title:string;
    CANVAS-BASED OCR OVERLAY
 ═══════════════════════════════════════════════════════════════ */
 function OcrOverlay({
-  ocrPage, imageScale, canvasWidth, canvasHeight,
+  ocrPage, imageScale, canvasWidth, canvasHeight, panMode,
 }: {
-  ocrPage: OcrPage; imageScale: number; canvasWidth: number; canvasHeight: number;
+  ocrPage: OcrPage; imageScale: number; canvasWidth: number; canvasHeight: number; panMode?: boolean;
 }) {
   const canvasRef  = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -603,6 +745,7 @@ function OcrOverlay({
   }, [scheduleDraw]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
+    if (panMode) return; // hand tool active — let the click bubble up to the pan handler
     if (e.button !== 0) return;
     e.preventDefault();
     const pos = toImg(e.clientX, e.clientY);
@@ -613,9 +756,10 @@ function OcrOverlay({
     setTooltip(null);
     setCopied(false);
     scheduleDraw();
-  }, [toImg, scheduleDraw]);
+  }, [toImg, scheduleDraw, panMode]);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
+    if (panMode) return;
     const pos = toImg(e.clientX, e.clientY);
     if (isDraggingRef.current && dragStartRef.current) {
       const start = dragStartRef.current;
@@ -637,9 +781,10 @@ function OcrOverlay({
       }
     }
     scheduleDraw();
-  }, [toImg, ocrPage.layout_lines, hitTest, intersects, scheduleDraw]);
+  }, [toImg, ocrPage.layout_lines, hitTest, intersects, scheduleDraw, panMode]);
 
   const onMouseUp = useCallback((e: React.MouseEvent) => {
+    if (panMode) return;
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
     const sel     = selRectRef.current;
@@ -670,7 +815,7 @@ function OcrOverlay({
     selRectRef.current = null;
     if (selectedRef.current.size > 0) { anchorRef.current = null; showTooltip(selectedRef.current); }
     scheduleDraw();
-  }, [toImg, hitTest, clearAll, showTooltip, ocrPage.layout_lines, imageScale, scheduleDraw]);
+  }, [toImg, hitTest, clearAll, showTooltip, ocrPage.layout_lines, imageScale, scheduleDraw, panMode]);
 
   const doCopy = useCallback((text: string) => {
     if (!text) return;
@@ -728,7 +873,8 @@ function OcrOverlay({
         position:"absolute", inset:0, width:canvasWidth, height:canvasHeight, pointerEvents:"none" }}/>
       <div ref={overlayRef} style={{
         position:"absolute", inset:0,
-        cursor: hoveredRef.current !== null && !isDraggingRef.current ? "pointer" : "crosshair",
+        cursor: panMode ? "inherit" : (hoveredRef.current !== null && !isDraggingRef.current ? "pointer" : "crosshair"),
+        pointerEvents: panMode ? "none" : "auto",
         userSelect:"none" }}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
@@ -772,6 +918,114 @@ function OcrOverlay({
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   ZOOM HOOK — shared ctrl+scroll zoom behavior (LINEAR)
+   Attaches a non-passive wheel listener to `targetRef` so we can
+   preventDefault() on ctrl+wheel (otherwise the browser would zoom
+   the whole page). Only ctrl/cmd+wheel changes zoom; plain wheel
+   scrolling is left completely untouched for normal scrolling.
+
+   IMPORTANT: the zoom level changes by a fixed, linear amount per
+   wheel tick (zoom = zoom ± step), NOT a multiplier of the current
+   zoom. Multiplicative zoom is what caused a small scroll to rocket
+   straight to 400% — this keeps every tick feeling the same size
+   regardless of how zoomed in you already are.
+═══════════════════════════════════════════════════════════════ */
+function useCtrlWheelZoom(targetRef: React.RefObject<HTMLElement>) {
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+
+  useEffect(() => {
+    const el = targetRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return; // let normal scroll pass through untouched
+      e.preventDefault();
+      // Linear step: same size change per wheel tick at any zoom level.
+      const delta = -e.deltaY * LINEAR_ZOOM_STEP;
+      const next  = clampZoom(zoomRef.current + delta);
+      zoomRef.current = next;
+      setZoom(next);
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetRef.current]);
+
+  const zoomIn  = useCallback(() => setZoom(z => { const n = clampZoom(z + ZOOM_BUTTON_STEP); zoomRef.current = n; return n; }), []);
+  const zoomOut = useCallback(() => setZoom(z => { const n = clampZoom(z - ZOOM_BUTTON_STEP); zoomRef.current = n; return n; }), []);
+  const reset   = useCallback(() => { zoomRef.current = 1; setZoom(1); }, []);
+
+  return { zoom, zoomIn, zoomOut, reset };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HAND TOOL HOOK — press "H" to enter pan/grab mode.
+   While active, dragging inside `targetRef` pans the scrollable
+   container by directly updating scrollLeft/scrollTop. A plain
+   click (mousedown+mouseup with no real movement) exits hand mode
+   and returns to the normal cursor/selection behavior.
+═══════════════════════════════════════════════════════════════ */
+function useHandTool(targetRef: React.RefObject<HTMLElement>) {
+  const [handMode, setHandMode] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const draggingRef = useRef(false);
+  const movedRef    = useRef(false);
+  const startRef    = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+
+  // "H" toggles hand mode on. (Typing in an input/textarea is ignored.)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key.toLowerCase() === "h" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        setHandMode(true);
+      }
+      if (e.key === "Escape") setHandMode(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    if (!handMode || e.button !== 0) return;
+    const el = targetRef.current;
+    if (!el) return;
+    e.preventDefault();
+    draggingRef.current = true;
+    movedRef.current    = false;
+    startRef.current = { x: e.clientX, y: e.clientY, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop };
+    setDragging(true);
+  }, [handMode, targetRef]);
+
+  const onMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!handMode || !draggingRef.current) return;
+    const el = targetRef.current;
+    if (!el) return;
+    const dx = e.clientX - startRef.current.x;
+    const dy = e.clientY - startRef.current.y;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) movedRef.current = true;
+    el.scrollLeft = startRef.current.scrollLeft - dx;
+    el.scrollTop  = startRef.current.scrollTop  - dy;
+  }, [handMode, targetRef]);
+
+  const onMouseUp = useCallback(() => {
+    if (!handMode) return;
+    // A plain click (no real drag) exits hand mode back to the normal cursor.
+    if (draggingRef.current && !movedRef.current) setHandMode(false);
+    draggingRef.current = false;
+    setDragging(false);
+  }, [handMode]);
+
+  const onMouseLeave = useCallback(() => {
+    draggingRef.current = false;
+    setDragging(false);
+  }, []);
+
+  return { handMode, dragging, onMouseDown, onMouseMove, onMouseUp, onMouseLeave };
+}
+
+/* ═══════════════════════════════════════════════════════════════
    IMAGE RENDERER
 ═══════════════════════════════════════════════════════════════ */
 function ImageRenderer({ src, ocrPage, fileName }: {
@@ -780,6 +1034,11 @@ function ImageRenderer({ src, ocrPage, fileName }: {
   const containerRef = useRef<HTMLDivElement>(null);
   const [imageScale, setImageScale] = useState(1);
   const [canvasDims, setCanvasDims] = useState({ w: 0, h: 0 });
+
+  // ── Ctrl + scroll zoom (linear) ──
+  const { zoom, zoomIn, zoomOut, reset } = useCtrlWheelZoom(containerRef);
+  // ── "H" hand/pan tool ──
+  const { handMode, dragging, onMouseDown, onMouseMove, onMouseUp, onMouseLeave } = useHandTool(containerRef);
 
   const computeScale = useCallback(() => {
     if (!containerRef.current) return;
@@ -805,18 +1064,34 @@ function ImageRenderer({ src, ocrPage, fileName }: {
   const scaledH = ocrPage ? ocrPage.height * imageScale : undefined;
 
   return (
-    <div ref={containerRef} style={{ flex:1, overflow:"auto", backgroundColor:"#060b14",
-      display:"flex", alignItems:"flex-start", justifyContent:"center",
-      padding:24, boxSizing:"border-box" }}>
-      <div style={{ position:"relative", width: scaledW ?? "auto", height: scaledH ?? "auto",
-        flexShrink:0, borderRadius:8, overflow:"hidden", boxShadow:"0 4px 40px rgba(0,0,0,0.6)" }}>
-        <img src={src} alt={fileName} onLoad={computeScale}
-          style={{ display:"block", width:"100%", height:"100%", objectFit:"contain", userSelect:"none" } as React.CSSProperties}
-          draggable={false}/>
-        {ocrPage && canvasDims.w > 0 && (
-          <OcrOverlay ocrPage={ocrPage} imageScale={imageScale} canvasWidth={canvasDims.w} canvasHeight={canvasDims.h}/>
-        )}
+    <div ref={containerRef}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseLeave}
+      style={{ flex:1, overflow:"auto", backgroundColor:"#060b14",
+      display:"flex", flexDirection:"column", alignItems:"center",
+      padding:24, boxSizing:"border-box", position:"relative",
+      cursor: handMode ? (dragging ? "grabbing" : "grab") : "default" }}>
+      {handMode && <HandModeHud/>}
+      <div style={{ flex:1, width:"100%", display:"flex", alignItems:"flex-start", justifyContent:"center" }}>
+        {/* ── Zoom wrapper: scaling this scales the image + OCR overlay together,
+             so hit-testing / selection coordinates stay perfectly aligned ── */}
+        <div style={{
+          position:"relative", width: scaledW ?? "auto", height: scaledH ?? "auto",
+          flexShrink:0, borderRadius:8, overflow:"hidden", boxShadow:"0 4px 40px rgba(0,0,0,0.6)",
+          transform:`scale(${zoom})`, transformOrigin:"top center",
+          transition: zoom === 1 ? "transform 0.15s ease" : "none",
+        }}>
+          <img src={src} alt={fileName} onLoad={computeScale}
+            style={{ display:"block", width:"100%", height:"100%", objectFit:"contain", userSelect:"none" } as React.CSSProperties}
+            draggable={false}/>
+          {ocrPage && canvasDims.w > 0 && (
+            <OcrOverlay ocrPage={ocrPage} imageScale={imageScale} canvasWidth={canvasDims.w} canvasHeight={canvasDims.h} panMode={handMode}/>
+          )}
+        </div>
       </div>
+      <ZoomHud zoom={zoom} onZoomIn={zoomIn} onZoomOut={zoomOut} onReset={reset}/>
     </div>
   );
 }
@@ -946,6 +1221,11 @@ function PdfRenderer({
   const [renderError,  setRenderError]  = useState<string | null>(null);
   const [overlayInfo,  setOverlayInfo]  = useState<{ scale: number; w: number; h: number } | null>(null);
 
+  // ── Ctrl + scroll zoom (linear) ──
+  const { zoom, zoomIn, zoomOut, reset } = useCtrlWheelZoom(containerRef);
+  // ── "H" hand/pan tool ──
+  const { handMode, dragging, onMouseDown, onMouseMove, onMouseUp, onMouseLeave } = useHandTool(containerRef);
+
   useEffect(() => {
     ocrPagesRef.current = ocrPages;
     const idx = new Map<number, OcrPage>();
@@ -1034,6 +1314,7 @@ function PdfRenderer({
     cancelActiveTask();
     lruCache.current.clear();
     pdfDocRef.current = null; prevPageRef.current = 1; pageNumRef.current = 1; setPageNum(1);
+    reset();
 
     (async () => {
       try {
@@ -1105,9 +1386,16 @@ function PdfRenderer({
   );
 
   return (
-    <div ref={containerRef} style={{ flex:1, minHeight:0, overflow:"auto", backgroundColor:"#060b14",
+    <div ref={containerRef}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
+      onMouseUp={onMouseUp}
+      onMouseLeave={onMouseLeave}
+      style={{ flex:1, minHeight:0, overflow:"auto", backgroundColor:"#060b14",
       display:"flex", alignItems:"flex-start", justifyContent:"center",
-      padding:24, boxSizing:"border-box", flexDirection:"column", gap:12 }}>
+      padding:24, boxSizing:"border-box", flexDirection:"column", gap:12, position:"relative",
+      cursor: handMode ? (dragging ? "grabbing" : "grab") : "default" }}>
+      {handMode && <HandModeHud/>}
       {totalPages > 1 && (
         <div style={{ display:"flex", alignItems:"center", gap:8, alignSelf:"center" }}>
           <button disabled={pageNum <= 1} onClick={() => setPageNum(p => p - 1)} style={{
@@ -1129,21 +1417,29 @@ function PdfRenderer({
           </button>
         </div>
       )}
-      <div style={{ position:"relative", alignSelf:"center", flexShrink:0, borderRadius:8, overflow:"hidden",
-        boxShadow:"0 4px 40px rgba(0,0,0,0.6)",
-        width: overlayInfo ? overlayInfo.w : undefined, height: overlayInfo ? overlayInfo.h : undefined,
-        minWidth: overlayInfo ? overlayInfo.w : 200, minHeight: overlayInfo ? overlayInfo.h : 200 }}>
-        {rendering && (
-          <div style={{ position:"absolute", inset:0, zIndex:10, display:"flex", alignItems:"center",
-            justifyContent:"center", backgroundColor:"rgba(6,11,20,0.75)", backdropFilter:"blur(2px)" }}>
-            <Loader2 size={28} style={{ color:"#818cf8" }} className="animate-spin"/>
-          </div>
-        )}
-        <canvas ref={canvasRef} style={{ display:"block" }}/>
-        {ocrPage && !rendering && overlayInfo && overlayInfo.w > 0 && (
-          <OcrOverlay ocrPage={ocrPage} imageScale={overlayInfo.scale} canvasWidth={overlayInfo.w} canvasHeight={overlayInfo.h}/>
-        )}
+      <div style={{ flex:1, width:"100%", display:"flex", alignItems:"flex-start", justifyContent:"center" }}>
+        {/* ── Zoom wrapper: scaling this scales the canvas + OCR overlay together ── */}
+        <div style={{
+          position:"relative", flexShrink:0, borderRadius:8, overflow:"hidden",
+          boxShadow:"0 4px 40px rgba(0,0,0,0.6)",
+          width: overlayInfo ? overlayInfo.w : undefined, height: overlayInfo ? overlayInfo.h : undefined,
+          minWidth: overlayInfo ? overlayInfo.w : 200, minHeight: overlayInfo ? overlayInfo.h : 200,
+          transform:`scale(${zoom})`, transformOrigin:"top center",
+          transition: zoom === 1 ? "transform 0.15s ease" : "none",
+        }}>
+          {rendering && (
+            <div style={{ position:"absolute", inset:0, zIndex:10, display:"flex", alignItems:"center",
+              justifyContent:"center", backgroundColor:"rgba(6,11,20,0.75)", backdropFilter:"blur(2px)" }}>
+              <Loader2 size={28} style={{ color:"#818cf8" }} className="animate-spin"/>
+            </div>
+          )}
+          <canvas ref={canvasRef} style={{ display:"block" }}/>
+          {ocrPage && !rendering && overlayInfo && overlayInfo.w > 0 && (
+            <OcrOverlay ocrPage={ocrPage} imageScale={overlayInfo.scale} canvasWidth={overlayInfo.w} canvasHeight={overlayInfo.h} panMode={handMode}/>
+          )}
+        </div>
       </div>
+      <ZoomHud zoom={zoom} onZoomIn={zoomIn} onZoomOut={zoomOut} onReset={reset}/>
     </div>
   );
 }
@@ -1152,17 +1448,26 @@ function PdfRenderer({
    DOCUMENT VIEWER
 ═══════════════════════════════════════════════════════════════ */
 function DocumentViewer({
-  doc, apiBase, userTier, collectionId, onRetry, onDelete,
+  doc, apiBase, userTier, collectionId, onRetry, onDelete, onResubmit, isResubmitted,
 }: {
   doc: Doc; apiBase: string; userTier?: string; collectionId: string;
   onRetry: (updatedDoc: Doc) => void;
   onDelete: (docId: number, fileName: string) => void;
+  onResubmit?: (docId: number) => void;
+  isResubmitted?: boolean;
 }) {
-  const [resubmitOpen, setResubmitOpen] = useState(false);
-  const [deleteOpen,   setDeleteOpen]   = useState(false);
-  const [retrying,     setRetrying]     = useState(false);
-  const [retryError,   setRetryError]   = useState<string | null>(null);
-  const [retrySuccess, setRetrySuccess] = useState(false);
+  const [resubmitOpen,    setResubmitOpen]    = useState(false);
+  const [deleteOpen,      setDeleteOpen]      = useState(false);
+  const [retrying,        setRetrying]        = useState(false);
+  const [retryError,      setRetryError]      = useState<string | null>(null);
+  const [retrySuccess,    setRetrySuccess]    = useState(false);
+
+  // ── track whether a resubmit has been submitted this session ──
+  // Combined with the `isResubmitted` prop (sourced from the page-level
+  // in-review fetch) via OR below, so the tag shows instantly after the
+  // modal closes AND correctly persists across a page refresh.
+  const [resubmittedThisSession, setResubmittedThisSession] = useState(false);
+  const resubmitted = resubmittedThisSession || !!isResubmitted;
 
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [pdfError,   setPdfError]   = useState<string | null>(null);
@@ -1176,6 +1481,9 @@ function DocumentViewer({
   const [copied,         setCopied]         = useState(false);
   const [txtDownloading, setTxtDownloading] = useState(false);
   const [activePdfPage,  setActivePdfPage]  = useState(1);
+
+  // ── NEW: generated-PDF download state ──
+  const [pdfDownloading, setPdfDownloading] = useState(false);
 
   const [deleteErrorMsg, setDeleteErrorMsg] = useState<string | null>(null);
 
@@ -1206,7 +1514,8 @@ function DocumentViewer({
 
   const ocrPage = ocrPages[0] ?? null;
 
-  useEffect(() => { setActivePdfPage(1); }, [doc.document_id]);
+  // Reset resubmitted state when a different document is selected
+  useEffect(() => { setActivePdfPage(1); setResubmittedThisSession(false); }, [doc.document_id]);
 
   useEffect(() => {
     if (!isPdf || !fileUrl) return;
@@ -1238,8 +1547,10 @@ function DocumentViewer({
 
   const handleResubmitSuccess = useCallback(() => {
     setResubmitOpen(false);
+    setResubmittedThisSession(true); // ← mark as submitted instantly
     setOcrVersion(v => v + 1);
-  }, []);
+    onResubmit?.(doc.document_id);   // ← notify parent so sidebar updates
+  }, [onResubmit, doc.document_id]);
 
   const handleDeleteSuccess = useCallback((docId: number, fileName: string) => {
     setDeleteOpen(false);
@@ -1339,6 +1650,41 @@ function DocumentViewer({
     } catch (err: any) { alert(`Download failed: ${err.message}`); }
   }
 
+  // ── NEW: download the generated, layout-preserving PDF from the backend ──
+  // Calls GET /collection/{collectionId}/document/{document_id}/download-pdf,
+  // which generates the PDF synchronously server-side (nothing persisted),
+  // and triggers a native browser download with the returned bytes.
+  async function downloadGeneratedPdf() {
+    if (pdfDownloading || status !== "completed") return;
+    setPdfDownloading(true);
+    try {
+      const res = await fetch(
+        `${apiBase}/collection/${collectionId}/document/${doc.document_id}/download-pdf`,
+        { credentials: "include" }
+      );
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || `HTTP ${res.status}`);
+      }
+      const disposition = res.headers.get("Content-Disposition");
+      const match = disposition && disposition.match(/filename="(.+)"/);
+      const filename = match
+        ? match[1]
+        : `${(doc.file_name || "document").replace(/\.[^/.]+$/, "")}.pdf`;
+
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(`PDF download failed: ${err.message || "Something went wrong."}`);
+    } finally {
+      setPdfDownloading(false);
+    }
+  }
+
   const pageLabel = isPdf && ocrPages.length > 1 ? ` (p.${activePdfPage})` : "";
 
   return (
@@ -1367,6 +1713,8 @@ function DocumentViewer({
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
         padding:"0 16px", height:44, borderBottom:"1px solid #1e293b",
         flexShrink:0, backgroundColor:"#0a1020" }}>
+
+        {/* ── LEFT side: file name, status badges, and resubmitted tag ── */}
         <div style={{ display:"flex", alignItems:"center", gap:8, minWidth:0 }}>
           <p style={{ fontSize:12, fontWeight:600, color:"#94a3b8", margin:0,
             overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{doc.file_name}</p>
@@ -1383,16 +1731,35 @@ function DocumentViewer({
               <RotateCcw size={10}/> Recomputed ({doc.version_count})
             </span>
           )}
+
+          {/* ── RESUBMITTED TAG — true blue, appears instantly after modal submit ── */}
+          {resubmitted && (
+            <span style={{
+              display:"inline-flex", alignItems:"center", gap:5, flexShrink:0,
+              backgroundColor:RESUBMIT_BLUE_BG,
+              color:RESUBMIT_BLUE,
+              fontSize:10, fontWeight:700,
+              padding:"2px 10px", borderRadius:9999,
+              border:`1px solid ${RESUBMIT_BLUE_BORDER}`,
+              letterSpacing:"0.04em",
+              animation:"resubmittedIn 0.25s cubic-bezier(0.34,1.56,0.64,1)",
+            }}>
+              <RotateCcw size={10}/>
+              Resubmitted
+            </span>
+          )}
+
           {ocrLoading && (
             <span style={{ display:"flex", alignItems:"center", gap:4, fontSize:10, color:"#64748b" }}>
               <Loader2 size={11} className="animate-spin"/> Loading OCR…
             </span>
           )}
           {(isImg || isPdf) && ocrPage && (
-            <span style={{ fontSize:10, color:"#64748b" }}>· Click or drag to select text</span>
+            <span style={{ fontSize:10, color:"#64748b" }}>· Click or drag to select text · Ctrl+Scroll to zoom · H to pan</span>
           )}
         </div>
 
+        {/* ── RIGHT side: action buttons ── */}
         <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
           {status === "failed" && (
             <button onClick={handleRetry} disabled={retrying} style={{
@@ -1445,6 +1812,26 @@ function DocumentViewer({
               onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(99,102,241,0.1)"}
             ><Download size={12}/> Download JSON</button>
           )}
+
+          {/* ── NEW: Download generated PDF ── */}
+          {status === "completed" && doc.ocr_url && (
+            <button onClick={downloadGeneratedPdf} disabled={pdfDownloading} style={{
+              all:"unset", display:"flex", alignItems:"center", gap:5,
+              backgroundColor: pdfDownloading ? "rgba(239,68,68,0.05)" : "rgba(239,68,68,0.1)",
+              color: pdfDownloading ? "#64748b" : "#f87171",
+              fontSize:11, fontWeight:600, padding:"4px 12px", borderRadius:9999,
+              cursor: pdfDownloading ? "not-allowed" : "pointer",
+              border:`1px solid ${pdfDownloading ? "rgba(239,68,68,0.1)" : "rgba(239,68,68,0.3)"}`,
+              transition:"all 0.15s" }}
+              onMouseEnter={e => { if (!pdfDownloading) (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(239,68,68,0.22)"; }}
+              onMouseLeave={e => { if (!pdfDownloading) (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(239,68,68,0.1)"; }}
+            >
+              {pdfDownloading
+                ? <><Loader2 size={12} className="animate-spin"/> Generating…</>
+                : <><Download size={12}/> Download PDF</>}
+            </button>
+          )}
+
           {userTier === "Premium" && status === "completed" && (
             <button onClick={() => setResubmitOpen(true)} style={{
               all:"unset", display:"flex", alignItems:"center", gap:5,
@@ -1572,6 +1959,7 @@ export default function CollectionDetailPage() {
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const [resubmittedDocIds, setResubmittedDocIds] = useState<Set<number>>(new Set());
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || BASE_URL;
 
@@ -1624,9 +2012,24 @@ export default function CollectionDetailPage() {
       .finally(() => setLoading(false));
   }, [id, API_BASE]);
 
+  // ── Fetch documents currently in review for this collection ──
+  const fetchInReviewDocuments = useCallback(() => {
+    if (!id) return;
+    fetch(`${API_BASE}/collection/${id}/documents/in-review`, { credentials:"include" })
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then(data => {
+        const ids: number[] = (data.documents ?? []).map((d: any) => d.document_id);
+        setResubmittedDocIds(new Set(ids));
+      })
+      .catch(() => {
+        // Non-critical: if this fails, the badge simply won't show until next refresh.
+      });
+  }, [id, API_BASE]);
+
   useEffect(() => {
     setSelected(null);
     fetchDocuments();
+    fetchInReviewDocuments();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDocRetry = useCallback((updatedDoc: Doc) => {
@@ -1733,6 +2136,10 @@ export default function CollectionDetailPage() {
         @keyframes toastIn {
           from { opacity:0; transform:translateX(24px) scale(0.96); }
           to   { opacity:1; transform:translateX(0) scale(1); }
+        }
+        @keyframes resubmittedIn {
+          from { opacity:0; transform:scale(0.8) translateY(2px); }
+          to   { opacity:1; transform:scale(1) translateY(0); }
         }
         .sk {
           background: linear-gradient(90deg,#1e293b 25%,#263347 50%,#1e293b 75%);
@@ -1917,6 +2324,7 @@ export default function CollectionDetailPage() {
                       isActive={selected?.document_id === doc.document_id}
                       onClick={() => handleSelectDoc(doc)}
                       apiBase={API_BASE}
+                      isResubmitted={resubmittedDocIds.has(doc.document_id)}
                     />
                   ))
             }
@@ -1974,6 +2382,8 @@ export default function CollectionDetailPage() {
                 collectionId={id}
                 onRetry={handleDocRetry}
                 onDelete={handleDocDelete}
+                onResubmit={docId => setResubmittedDocIds(prev => new Set(prev).add(docId))}
+                isResubmitted={resubmittedDocIds.has(selected.document_id)}
               />
             ) : (
               <Placeholder
